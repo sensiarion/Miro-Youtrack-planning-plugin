@@ -49,11 +49,9 @@ async function loadTasks(queryOverride?: string) {
       console.log('First issue assignee:', issues[0].assignee);
     }
     
-    // Save query if it was provided
-    if (queryToUse) {
-      saveSettings({ taskQuery: queryToUse });
-      taskQuery.value = queryToUse;
-    }
+    // Save query (even if empty, to remember user preference)
+    saveSettings({ taskQuery: queryToUse });
+    taskQuery.value = queryToUse;
   } catch (error: any) {
     taskError.value = error.message || 'Failed to load tasks';
     console.error('Failed to load tasks:', error);

@@ -19,10 +19,13 @@ useDropHandler();
 // Handle settings saved - switch to tasks tab and load tasks
 function handleSettingsSaved() {
   activeTab.value = 'tasks';
-  // Trigger default search after a short delay to ensure settings are saved
+  // Trigger search after a short delay to ensure settings are saved
+  // Use saved query if exists, otherwise use empty string (default search)
   setTimeout(() => {
     if (tasksTabRef.value) {
-      tasksTabRef.value.loadTasks('');
+      const settings = loadSettings();
+      const queryToUse = settings.taskQuery || '';
+      tasksTabRef.value.loadTasks(queryToUse);
     }
   }, 100);
 }
@@ -34,7 +37,9 @@ onMounted(async () => {
     // Small delay to ensure component is mounted
     setTimeout(() => {
       if (tasksTabRef.value) {
-        tasksTabRef.value.loadTasks('');
+        // Use saved query if exists, otherwise use empty string (default search)
+        const queryToUse = settings.taskQuery || '';
+        tasksTabRef.value.loadTasks(queryToUse);
       }
     }, 100);
   }

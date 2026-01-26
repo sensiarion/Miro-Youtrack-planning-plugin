@@ -20,27 +20,27 @@ export function getTaskColor(stateName: string): string {
 }
 
 /**
- * Build plain text content for mindmap node (no HTML, just text)
+ * Build HTML content for mindmap node with clickable task ID link
  */
 export function buildTaskMindmapContent(issue: YouTrackIssue): string {
   const parts: string[] = [];
   
-  // Add task ID
-  parts.push(issue.idReadable);
+  // Add task ID as clickable link
+  parts.push(`<a href="${issue.url}" target="_blank">${issue.idReadable}</a>`);
   
   // Add summary
   parts.push(issue.summary);
   
-  // Add assignee (always present, shows "Unassigned" if no assignee)
+  // Add assignee on new line (always present, shows "Unassigned" if no assignee)
   parts.push(`👤 ${issue.assignee}`);
   
-  // Add tags
+  // Add tags on new line as "(<tag1>, <tag2>, ...)"
   if (issue.tags.length > 0) {
     const tagNames = issue.tags.map(t => t.name).join(', ');
-    parts.push(`Tags: ${tagNames}`);
+    parts.push(`(${tagNames})`);
   }
   
-  return parts.join('\n');
+  return parts.join('<br>');
 }
 
 /**
@@ -80,7 +80,7 @@ export async function createTaskShapeAt(issue: YouTrackIssue, x: number, y: numb
   
   // Create mindmap node with shape type
   // Note: Don't set isRoot when creating - Miro will determine this automatically
-  // Note: fillColor cannot be set during creation, must be set after
+
   const node = await miro.board.experimental.createMindmapNode({
     nodeView: {
       type: 'shape',
@@ -99,10 +99,7 @@ export async function createTaskShapeAt(issue: YouTrackIssue, x: number, y: numb
   
   node.linkedTo = issue.url;
   
-  // Set fillColor directly on the node (not in style)
-  // According to Miro API, fillColor is a property of the board item, not style
-  (node as any).fillColor = color; // Background color based on task status
-  
+
   await node.sync();
   
   // Mark as plugin-managed via metadata
@@ -128,8 +125,7 @@ export async function updateTaskShape(node: any, issue: YouTrackIssue): Promise<
   if (node.nodeView.style) {
     node.nodeView.style.color = color; // Update node color based on task status (Yellow/Green/Purple)
   }
-  // Update fillColor directly on the node (not in style)
-  node.fillColor = color; // Background color based on task status
+  
   node.linkedTo = issue.url;
   
   await node.sync();

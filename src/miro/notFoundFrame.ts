@@ -33,7 +33,6 @@ export async function getOrCreateNotFoundFrame(): Promise<any> {
     width: DEFAULT_FRAME_WIDTH,
     height: DEFAULT_FRAME_HEIGHT,
     style: {
-      fillColor: '#f5f5f5',
     },
   });
   

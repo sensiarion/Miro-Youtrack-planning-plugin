@@ -130,39 +130,88 @@ export function useSync() {
       if (issueMap.size > 0) {
         const notFoundFrame = await getOrCreateNotFoundFrame();
         
-        const itemsPerRow = 4;
-        const spacing = 250;
+        // Spacing between cards (horizontal and vertical offset)
+        // Use card dimensions + gap to prevent overlap
+        const horizontalSpacing = TASK_SHAPE_WIDTH + 50; // Card width + 50px gap
+        const verticalSpacing = TASK_SHAPE_HEIGHT + 50; // Card height + 50px gap
         const padding = 100;
-        const startX = padding;
-        const startY = padding;
+        const itemsPerRow = 4;
         
-        await expandFrameIfNeeded(notFoundFrame, issueMap.size, itemsPerRow, TASK_SHAPE_WIDTH, TASK_SHAPE_HEIGHT, spacing);
+        await expandFrameIfNeeded(notFoundFrame, issueMap.size, itemsPerRow, TASK_SHAPE_WIDTH, TASK_SHAPE_HEIGHT, horizontalSpacing);
         await notFoundFrame.sync();
         
         const frameWidth = notFoundFrame.width || DEFAULT_FRAME_WIDTH;
         const frameHeight = notFoundFrame.height || DEFAULT_FRAME_HEIGHT;
         
+        // Calculate frame boundaries
+        const frameLeft = notFoundFrame.x - frameWidth / 2;
+        const frameTop = notFoundFrame.y - frameHeight / 2;
+        const frameRight = notFoundFrame.x + frameWidth / 2;
+        const frameBottom = notFoundFrame.y + frameHeight / 2;
+        
+        // Track positions of created cards to prevent overlap
+        const createdPositions: Array<{ x: number; y: number; width: number; height: number }> = [];
+        
         let index = 0;
         for (const issue of issueMap.values()) {
-          const row = Math.floor(index / itemsPerRow);
-          const col = index % itemsPerRow;
-          const relX = startX + col * spacing;
-          const relY = startY + row * spacing;
-          
-          const shapeX = notFoundFrame.x - (frameWidth / 2) + relX;
-          const shapeY = notFoundFrame.y - (frameHeight / 2) + relY;
-          
           const color = getTaskColor(issue.stateName);
           const content = buildTaskMindmapContent(issue);
           
-          const frameLeft = notFoundFrame.x - frameWidth / 2;
-          const frameTop = notFoundFrame.y - frameHeight / 2;
-          const frameRight = notFoundFrame.x + frameWidth / 2;
-          const frameBottom = notFoundFrame.y + frameHeight / 2;
+          // Calculate grid position
+          const row = Math.floor(index / itemsPerRow);
+          const col = index % itemsPerRow;
           
+          // Calculate base position relative to frame top-left
+          // Position is center of card, so we need to account for card dimensions
+          const baseRelX = padding + col * horizontalSpacing + TASK_SHAPE_WIDTH / 2;
+          const baseRelY = padding + row * verticalSpacing + TASK_SHAPE_HEIGHT / 2;
+          
+          // Convert to absolute coordinates (center of card)
+          let shapeX = frameLeft + baseRelX;
+          let shapeY = frameTop + baseRelY;
+          
+          // Check for overlaps with previously created cards and adjust if needed
+          const cardHalfWidth = TASK_SHAPE_WIDTH / 2;
+          const cardHalfHeight = TASK_SHAPE_HEIGHT / 2;
+          const minDistanceX = TASK_SHAPE_WIDTH + 50; // Minimum horizontal distance
+          const minDistanceY = TASK_SHAPE_HEIGHT + 50; // Minimum vertical distance
+          
+          let adjustedX = shapeX;
+          let adjustedY = shapeY;
+          let hasOverlap = true;
+          let attempts = 0;
+          const maxAttempts = 50;
+          
+          // Find a non-overlapping position
+          while (hasOverlap && attempts < maxAttempts) {
+            hasOverlap = false;
+            
+            for (const pos of createdPositions) {
+              const distanceX = Math.abs(adjustedX - pos.x);
+              const distanceY = Math.abs(adjustedY - pos.y);
+              
+              // Check if cards would overlap (considering card dimensions)
+              if (distanceX < minDistanceX && distanceY < minDistanceY) {
+                hasOverlap = true;
+                break;
+              }
+            }
+            
+            if (hasOverlap) {
+              // Move to next grid position
+              attempts++;
+              const newRow = Math.floor((index + attempts) / itemsPerRow);
+              const newCol = (index + attempts) % itemsPerRow;
+              
+              adjustedX = frameLeft + padding + newCol * horizontalSpacing + TASK_SHAPE_WIDTH / 2;
+              adjustedY = frameTop + padding + newRow * verticalSpacing + TASK_SHAPE_HEIGHT / 2;
+            }
+          }
+          
+          // Ensure position is within frame bounds (with margin for card size)
           const shapeMargin = Math.max(TASK_SHAPE_WIDTH, TASK_SHAPE_HEIGHT) / 2;
-          const clampedX = Math.max(frameLeft + shapeMargin, Math.min(frameRight - shapeMargin, shapeX));
-          const clampedY = Math.max(frameTop + shapeMargin, Math.min(frameBottom - shapeMargin, shapeY));
+          const clampedX = Math.max(frameLeft + shapeMargin, Math.min(frameRight - shapeMargin, adjustedX));
+          const clampedY = Math.max(frameTop + shapeMargin, Math.min(frameBottom - shapeMargin, adjustedY));
           
           const node = await miro.board.experimental.createMindmapNode({
             nodeView: {
@@ -181,7 +230,6 @@ export function useSync() {
           });
           
           node.linkedTo = issue.url;
-          node.fillColor = color; // Background color based on task status
           await node.sync();
           
           await node.setMetadata(METADATA_KEY, {
@@ -191,6 +239,14 @@ export function useSync() {
             stateNameLocalized: issue.stateNameLocalized,
             tags: issue.tags,
             assignee: issue.assignee,
+          });
+          
+          // Store position and dimensions of created card to prevent future overlaps
+          createdPositions.push({ 
+            x: clampedX, 
+            y: clampedY, 
+            width: TASK_SHAPE_WIDTH, 
+            height: TASK_SHAPE_HEIGHT 
           });
           
           createdCount++;
