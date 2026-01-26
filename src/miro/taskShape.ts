@@ -20,11 +20,46 @@ export function getTaskColor(stateName: string): string {
 }
 
 /**
- * Build HTML content for task shape
+ * Build plain text content for mindmap node (no HTML, just text)
  */
-export function buildTaskShapeContent(issue: YouTrackIssue): string {
-  const tagsText = issue.tags.length > 0 ? ` (${issue.tags.join(', ')})` : '';
-  return `<p><a href="${issue.url}">${issue.idReadable}</a> ${issue.summary}${tagsText}</p>`;
+export function buildTaskMindmapContent(issue: YouTrackIssue): string {
+  const parts: string[] = [];
+  
+  // Add task ID
+  parts.push(issue.idReadable);
+  
+  // Add summary
+  parts.push(issue.summary);
+  
+  // Add assignee (always present, shows "Unassigned" if no assignee)
+  parts.push(`👤 ${issue.assignee}`);
+  
+  // Add tags
+  if (issue.tags.length > 0) {
+    const tagNames = issue.tags.map(t => t.name).join(', ');
+    parts.push(`Tags: ${tagNames}`);
+  }
+  
+  return parts.join('\n');
+}
+
+/**
+ * Get contrast color (black or white) for a given background color
+ */
+function getContrastColor(hexColor: string): string {
+  // Remove # if present
+  const hex = hexColor.replace('#', '');
+  
+  // Convert to RGB
+  const r = parseInt(hex.substr(0, 2), 16);
+  const g = parseInt(hex.substr(2, 2), 16);
+  const b = parseInt(hex.substr(4, 2), 16);
+  
+  // Calculate luminance
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  
+  // Return black for light colors, white for dark colors
+  return luminance > 0.5 ? '#000000' : '#ffffff';
 }
 
 /**
@@ -37,54 +72,74 @@ export function extractIssueUrlFromShape(content: string): string | null {
 }
 
 /**
- * Create a task shape on the board at specified coordinates
+ * Create a task mindmap node on the board at specified coordinates
  */
 export async function createTaskShapeAt(issue: YouTrackIssue, x: number, y: number): Promise<void> {
   const color = getTaskColor(issue.stateName);
-  const content = buildTaskShapeContent(issue);
+  const content = buildTaskMindmapContent(issue);
   
-  const shape = await miro.board.createShape({
-    shape: 'round_rectangle',
-    content,
+  // Create mindmap node with shape type
+  // Note: Don't set isRoot when creating - Miro will determine this automatically
+  // Note: fillColor cannot be set during creation, must be set after
+  const node = await miro.board.experimental.createMindmapNode({
+    nodeView: {
+      type: 'shape',
+      shape: 'round_rectangle',
+      content,
+      style: {
+        color: '#1a1a1a',
+        fillOpacity: TASK_FILL_OPACITY,
+        fontSize: 14,
+        borderStyle: 'normal',
+      },
+    },
     x,
     y,
-    width: TASK_SHAPE_WIDTH,
-    height: TASK_SHAPE_HEIGHT,
-    style: {
-      fillColor: color,
-      fillOpacity: TASK_FILL_OPACITY,
-      color: '#1a1a1a',
-      fontSize: 14,
-      textAlign: 'left',
-      textAlignVertical: 'top',
-    },
   });
   
+  node.linkedTo = issue.url;
+  
+  // Set fillColor after creation (cannot be set during creation)
+  if (node.nodeView && node.nodeView.style) {
+    node.nodeView.style.fillColor = color;
+  }
+  
+  await node.sync();
+  
   // Mark as plugin-managed via metadata
-  await shape.setMetadata(METADATA_KEY, {
+  await node.setMetadata(METADATA_KEY, {
     issueId: issue.idReadable,
     issueUrl: issue.url,
     stateName: issue.stateName,
+    stateNameLocalized: issue.stateNameLocalized,
+    tags: issue.tags,
+    assignee: issue.assignee,
   });
 }
 
 /**
- * Update an existing task shape with new issue data
+ * Update an existing task mindmap node with new issue data
  */
-export async function updateTaskShape(shape: any, issue: YouTrackIssue): Promise<void> {
+export async function updateTaskShape(node: any, issue: YouTrackIssue): Promise<void> {
   const color = getTaskColor(issue.stateName);
-  const content = buildTaskShapeContent(issue);
+  const content = buildTaskMindmapContent(issue);
   
-  shape.content = content;
-  shape.style.fillColor = color;
-  shape.style.fillOpacity = TASK_FILL_OPACITY;
+  // Update node view content and color
+  node.nodeView.content = content;
+  if (node.nodeView.style) {
+    node.nodeView.style.fillColor = color; // Update background color based on state
+  }
+  node.linkedTo = issue.url;
   
-  await shape.sync();
+  await node.sync();
   
   // Update metadata
-  await shape.setMetadata(METADATA_KEY, {
+  await node.setMetadata(METADATA_KEY, {
     issueId: issue.idReadable,
     issueUrl: issue.url,
     stateName: issue.stateName,
+    stateNameLocalized: issue.stateNameLocalized,
+    tags: issue.tags,
+    assignee: issue.assignee,
   });
 }

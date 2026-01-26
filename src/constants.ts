@@ -1,8 +1,8 @@
 // Task state colors and styling constants
 export const TASK_COLORS = {
-  PLANNING: '#ffff00', // Yellow
-  IN_WORK: '#00ff00',  // Green
-  DONE: '#800080',     // Purple
+  PLANNING: '#FFF6B6', // Yellow
+  IN_WORK: '#ADF0C7',  // Green
+  DONE: '#DEDAFF',     // Purple
 } as const;
 
 export const TASK_FILL_OPACITY = 0.7; // Default transparency

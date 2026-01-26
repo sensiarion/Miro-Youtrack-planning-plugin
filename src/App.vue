@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import './assets/style.css';
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { loadSettings, saveSettings, loadSyncState, saveSyncState, type Settings, type SyncState } from './storage';
 import { searchIssues } from './youtrack/client';
 import { YouTrackIssue } from './youtrack/types';
-import { createTaskShapeAt, updateTaskShape, extractIssueUrlFromShape, getTaskColor, buildTaskShapeContent } from './miro/taskShape';
+import { createTaskShapeAt, updateTaskShape, extractIssueUrlFromShape, getTaskColor, buildTaskMindmapContent } from './miro/taskShape';
 import { getOrCreateNotFoundFrame, expandFrameIfNeeded, DEFAULT_FRAME_WIDTH, DEFAULT_FRAME_HEIGHT } from './miro/notFoundFrame';
 import { METADATA_KEY, TASK_FILL_OPACITY, TASK_SHAPE_WIDTH, TASK_SHAPE_HEIGHT } from './constants';
 const activeTab = ref<'tasks' | 'sync' | 'settings'>('tasks');
@@ -16,6 +16,7 @@ const taskQuery = ref(settings.value.taskQuery);
 const taskIssues = ref<YouTrackIssue[]>([]);
 const isLoadingTasks = ref(false);
 const taskError = ref<string | null>(null);
+const isCreatingTask = ref(false); // Guard to prevent duplicate drops
 
 // Sync tab state
 const syncQuery = ref(settings.value.syncQuery);
@@ -63,6 +64,13 @@ async function loadTasks(queryOverride?: string) {
     });
     taskIssues.value = issues;
     
+    // Debug: log issues to check assignee
+    if (issues.length > 0) {
+      console.log('Loaded issues:', issues.length);
+      console.log('First issue:', issues[0]);
+      console.log('First issue assignee:', issues[0].assignee);
+    }
+    
     // Save query if it was provided
     if (queryToUse) {
       saveSettings({ taskQuery: queryToUse });
@@ -79,17 +87,44 @@ async function loadTasks(queryOverride?: string) {
 
 // Handle drop event for drag and drop
 async function handleDrop(event: { x: number; y: number; target: HTMLElement }) {
+  // Prevent duplicate drops
+  if (isCreatingTask.value) {
+    console.log('Drop handler already processing, ignoring duplicate drop');
+    return;
+  }
+  
   try {
-    const issueData = event.target.getAttribute('data-issue');
+    isCreatingTask.value = true;
+    
+    // Find the draggable element (might be the target or a parent)
+    let element: HTMLElement | null = event.target as HTMLElement;
+    let issueData: string | null = null;
+    
+    // Try to find data-issue attribute on target or parent elements
+    while (element && !issueData) {
+      issueData = element.getAttribute('data-issue');
+      if (!issueData && element.parentElement) {
+        element = element.parentElement;
+      } else {
+        break;
+      }
+    }
+    
     if (!issueData) {
-      console.error('No issue data found on dropped element');
+      console.error('No issue data found on dropped element', event.target);
       return;
     }
 
     const issue: YouTrackIssue = JSON.parse(issueData);
+    console.log('Creating task node for issue:', issue.idReadable, 'assignee:', issue.assignee);
     await createTaskShapeAt(issue, event.x, event.y);
   } catch (error) {
     console.error('Failed to create task shape on drop:', error);
+  } finally {
+    // Reset flag after a short delay to prevent rapid successive drops
+    setTimeout(() => {
+      isCreatingTask.value = false;
+    }, 500);
   }
 }
 
@@ -145,14 +180,16 @@ async function syncTasks() {
       issueMap.set(issue.url, issue);
     });
 
-    // Get all shapes on board
+    // Get all mindmap nodes and shapes on board (for backward compatibility)
+    const allMindmapNodes = await miro.board.experimental.get({ type: 'mindmap_node' });
     const allShapes = await miro.board.get({ type: 'shape' });
+    const allItems = [...allMindmapNodes, ...allShapes];
     
     // Identify plugin-managed task shapes and build synced tasks list
     const taskShapes: Array<{ shape: any; issueUrl: string | null; issue: YouTrackIssue | null }> = [];
     const syncedTasksList: YouTrackIssue[] = [];
     
-    for (const shape of allShapes) {
+    for (const shape of allItems) {
       let issueUrl: string | null = null;
       let issue: YouTrackIssue | null = null;
       
@@ -178,8 +215,9 @@ async function syncTasks() {
                 idReadable: idMatch[1],
                 summary: summaryMatch[1].trim(),
                 tags: [],
-                assignee: null,
+                assignee: 'Unassigned',
                 stateName: metadata.stateName || '',
+                stateNameLocalized: null,
                 url: issueUrl,
               });
             }
@@ -190,14 +228,24 @@ async function syncTasks() {
         // Metadata not found or error
       }
       
-      // Fallback: parse from content
-      issueUrl = extractIssueUrlFromShape(shape.content || '');
-      if (issueUrl) {
+      // Fallback: parse from content (for shapes) or linkedTo (for mindmap nodes)
+      if (shape.type === 'mindmap_node' && shape.linkedTo) {
+        issueUrl = shape.linkedTo;
         issue = issueMap.get(issueUrl) || null;
         taskShapes.push({ shape, issueUrl, issue });
         
         if (issue) {
           syncedTasksList.push(issue);
+        }
+      } else {
+        issueUrl = extractIssueUrlFromShape(shape.content || '');
+        if (issueUrl) {
+          issue = issueMap.get(issueUrl) || null;
+          taskShapes.push({ shape, issueUrl, issue });
+          
+          if (issue) {
+            syncedTasksList.push(issue);
+          }
         }
       }
     }
@@ -256,10 +304,11 @@ async function syncTasks() {
         const shapeX = notFoundFrame.x - (frameWidth / 2) + relX;
         const shapeY = notFoundFrame.y - (frameHeight / 2) + relY;
         
-        // Create shape at calculated position
+        // Create mindmap node at calculated position
         const color = getTaskColor(issue.stateName);
-        const content = buildTaskShapeContent(issue);
-        // Ensure shape is within frame bounds before creating
+        const content = buildTaskMindmapContent(issue);
+        
+        // Ensure node is within frame bounds before creating
         // Frame bounds: from (notFoundFrame.x - frameWidth/2, notFoundFrame.y - frameHeight/2)
         // to (notFoundFrame.x + frameWidth/2, notFoundFrame.y + frameHeight/2)
         const frameLeft = notFoundFrame.x - frameWidth / 2;
@@ -272,53 +321,45 @@ async function syncTasks() {
         const clampedX = Math.max(frameLeft + shapeMargin, Math.min(frameRight - shapeMargin, shapeX));
         const clampedY = Math.max(frameTop + shapeMargin, Math.min(frameBottom - shapeMargin, shapeY));
         
-        const shape = await miro.board.createShape({
-          shape: 'round_rectangle',
-          content,
+        // Create mindmap node
+        // Note: Don't set isRoot when creating - Miro will determine this automatically
+        // Note: fillColor cannot be set during creation, must be set after
+        const node = await miro.board.experimental.createMindmapNode({
+          nodeView: {
+            type: 'shape',
+            shape: 'round_rectangle',
+            content,
+            style: {
+              color: '#1a1a1a',
+              fillOpacity: TASK_FILL_OPACITY,
+              fontSize: 14,
+              borderStyle: 'normal',
+            },
+          },
           x: clampedX,
           y: clampedY,
-          width: TASK_SHAPE_WIDTH,
-          height: TASK_SHAPE_HEIGHT,
-          style: {
-            fillColor: color,
-            fillOpacity: TASK_FILL_OPACITY,
-            color: '#1a1a1a',
-            fontSize: 14,
-            textAlign: 'left',
-            textAlignVertical: 'top',
-          },
         });
         
-        await shape.setMetadata(METADATA_KEY, {
+        node.linkedTo = issue.url;
+        
+        // Set fillColor after creation (cannot be set during creation)
+        if (node.nodeView && node.nodeView.style) {
+          node.nodeView.style.fillColor = color;
+        }
+        
+        await node.sync();
+        
+        await node.setMetadata(METADATA_KEY, {
           issueId: issue.idReadable,
           issueUrl: issue.url,
           stateName: issue.stateName,
+          stateNameLocalized: issue.stateNameLocalized,
+          tags: issue.tags,
+          assignee: issue.assignee,
         });
         
-        // Try to add to frame, expand frame if it fails
-        try {
-          await notFoundFrame.add(shape);
-        } catch (error: any) {
-          // If adding fails (item not inside frame), expand frame and retry
-          console.warn('Failed to add shape to frame, expanding frame:', error);
-          
-          // Calculate required dimensions based on current item position
-          const rows = Math.ceil((index + 1) / itemsPerRow);
-          const requiredWidth = Math.max(frameWidth, itemsPerRow * (TASK_SHAPE_WIDTH + spacing) + padding * 2);
-          const requiredHeight = Math.max(frameHeight, rows * (TASK_SHAPE_HEIGHT + spacing) + padding * 2);
-          
-          notFoundFrame.width = requiredWidth;
-          notFoundFrame.height = requiredHeight;
-          await notFoundFrame.sync();
-          
-          // Retry adding
-          try {
-            await notFoundFrame.add(shape);
-          } catch (retryError: any) {
-            console.error('Failed to add shape to frame after expansion:', retryError);
-            // Shape will remain on board but not in frame
-          }
-        }
+        // Note: Mindmap nodes cannot be added to frames
+        // They will be positioned on the board but not inside the frame
         
         createdCount++;
         index++;
@@ -348,13 +389,49 @@ async function syncTasks() {
   }
 }
 
+/**
+ * Get contrast color (black or white) for a given background color
+ */
+function getContrastColor(hexColor: string): string {
+  // Remove # if present
+  const hex = hexColor.replace('#', '');
+  
+  // Convert to RGB
+  const r = parseInt(hex.substr(0, 2), 16);
+  const g = parseInt(hex.substr(2, 2), 16);
+  const b = parseInt(hex.substr(4, 2), 16);
+  
+  // Calculate luminance
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  
+  // Return black for light colors, white for dark colors
+  return luminance > 0.5 ? '#000000' : '#ffffff';
+}
+
+// Store drop handler reference to allow cleanup
+let dropHandlerRef: ((event: { x: number; y: number; target: HTMLElement }) => Promise<void>) | null = null;
+
 // Initialize drop handler and auto-load if settings are configured
 onMounted(async () => {
-  await miro.board.ui.on('drop', handleDrop);
+  // Remove existing handler if any (to prevent duplicates)
+  if (dropHandlerRef) {
+    await miro.board.ui.off('drop', dropHandlerRef);
+  }
+  
+  dropHandlerRef = handleDrop;
+  await miro.board.ui.on('drop', dropHandlerRef);
   
   // If settings are already configured, trigger default search
   if (hasValidSettings.value) {
     await loadTasks('');
+  }
+});
+
+// Cleanup drop handler on unmount
+onUnmounted(async () => {
+  if (dropHandlerRef) {
+    await miro.board.ui.off('drop', dropHandlerRef);
+    dropHandlerRef = null;
   }
 });
 </script>
@@ -416,15 +493,41 @@ onMounted(async () => {
           <div 
             v-for="issue in taskIssues"
             :key="issue.idReadable"
-            class="task-item miro-draggable"
+            class="task-item miro-draggable mindmap-card"
             :data-issue="JSON.stringify(issue)"
           >
-            <div class="task-id">{{ issue.idReadable }}</div>
+            <div class="task-header">
+              <div class="task-id">{{ issue.idReadable }}</div>
+              <a 
+                :href="issue.url" 
+                target="_blank" 
+                class="task-link-icon"
+                title="Open in YouTrack"
+                @click.stop
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 3.33333V8M12 8L9.33333 5.33333M12 8L9.33333 10.6667M8 12.6667H3.33333C2.59695 12.6667 2 12.0697 2 11.3333V4.66667C2 3.93029 2.59695 3.33333 3.33333 3.33333H8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </a>
+            </div>
             <div class="task-summary">{{ issue.summary }}</div>
             <div class="task-meta">
-              <span v-if="issue.stateName" class="task-state">{{ issue.stateName }}</span>
-              <span v-if="issue.assignee" class="task-assignee">{{ issue.assignee }}</span>
-              <span v-if="issue.tags.length > 0" class="task-tags">{{ issue.tags.join(', ') }}</span>
+              <span v-if="issue.stateNameLocalized || issue.stateName" class="task-state">
+                {{ issue.stateNameLocalized || issue.stateName }}
+              </span>
+              <span class="task-assignee" :class="{ 'task-assignee-unassigned': issue.assignee === 'Unassigned' }">
+                👤 {{ issue.assignee }}
+              </span>
+            </div>
+            <div v-if="issue.tags.length > 0" class="task-tags-container">
+              <span 
+                v-for="tag in issue.tags" 
+                :key="tag.name"
+                class="task-tag"
+                :style="tag.color ? { backgroundColor: tag.color, color: getContrastColor(tag.color) } : {}"
+              >
+                {{ tag.name }}
+              </span>
             </div>
           </div>
         </div>
@@ -487,13 +590,39 @@ onMounted(async () => {
               :key="issue.idReadable"
               class="task-item"
             >
+            <div class="task-header">
               <div class="task-id">{{ issue.idReadable }}</div>
-              <div class="task-summary">{{ issue.summary }}</div>
-              <div class="task-meta">
-                <span v-if="issue.stateName" class="task-state">{{ issue.stateName }}</span>
-                <span v-if="issue.assignee" class="task-assignee">{{ issue.assignee }}</span>
-                <span v-if="issue.tags.length > 0" class="task-tags">{{ issue.tags.join(', ') }}</span>
-              </div>
+              <a 
+                :href="issue.url" 
+                target="_blank" 
+                class="task-link-icon"
+                title="Open in YouTrack"
+                @click.stop
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 3.33333V8M12 8L9.33333 5.33333M12 8L9.33333 10.6667M8 12.6667H3.33333C2.59695 12.6667 2 12.0697 2 11.3333V4.66667C2 3.93029 2.59695 3.33333 3.33333 3.33333H8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </a>
+            </div>
+            <div class="task-summary">{{ issue.summary }}</div>
+            <div class="task-meta">
+              <span v-if="issue.stateNameLocalized || issue.stateName" class="task-state">
+                {{ issue.stateNameLocalized || issue.stateName }}
+              </span>
+              <span class="task-assignee" :class="{ 'task-assignee-unassigned': issue.assignee === 'Unassigned' }">
+                👤 {{ issue.assignee }}
+              </span>
+            </div>
+            <div v-if="issue.tags.length > 0" class="task-tags-container">
+              <span 
+                v-for="tag in issue.tags" 
+                :key="tag.name"
+                class="task-tag"
+                :style="tag.color ? { backgroundColor: tag.color, color: getContrastColor(tag.color) } : {}"
+              >
+                {{ tag.name }}
+              </span>
+            </div>
             </div>
           </div>
         </div>
@@ -711,20 +840,27 @@ small {
 }
 
 .task-item {
-  padding: 12px;
-  border: 1px solid var(--gray-200, #e5e7eb);
-  border-radius: 6px;
-  margin-bottom: 8px;
+  padding: 16px;
+  border: 2px solid var(--gray-200, #e5e7eb);
+  border-radius: 12px;
+  margin-bottom: 12px;
   cursor: grab;
   background: white;
   transition: all 0.2s;
   user-select: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.mindmap-card {
+  border-radius: 16px;
+  border-width: 2px;
+  position: relative;
 }
 
 .task-item:hover {
   border-color: var(--blue-400, #60a5fa);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
 }
 
 .task-item:active {
@@ -732,18 +868,43 @@ small {
   transform: translateY(0);
 }
 
+.task-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
 .task-id {
-  font-weight: 600;
+  font-weight: 700;
   color: var(--blue-600, #2563eb);
-  margin-bottom: 4px;
-  font-size: 14px;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+}
+
+.task-link-icon {
+  color: var(--gray-500, #6b7280);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.task-link-icon:hover {
+  color: var(--blue-600, #2563eb);
+  background: var(--blue-50, #eff6ff);
 }
 
 .task-summary {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   color: var(--gray-900, #111827);
   font-size: 14px;
-  line-height: 1.4;
+  line-height: 1.5;
+  font-weight: 500;
 }
 
 .task-meta {
@@ -752,26 +913,50 @@ small {
   font-size: 12px;
   color: var(--gray-600, #4b5563);
   flex-wrap: wrap;
+  margin-bottom: 8px;
 }
 
 .task-state {
-  padding: 2px 8px;
+  padding: 4px 10px;
   background: var(--gray-100, #f3f4f6);
-  border-radius: 4px;
-  font-weight: 500;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .task-assignee {
-  padding: 2px 8px;
+  padding: 4px 10px;
   background: var(--blue-50, #eff6ff);
-  border-radius: 4px;
+  border-radius: 6px;
   color: var(--blue-700, #1d4ed8);
+  font-weight: 500;
+  font-size: 11px;
+  display: inline-block;
 }
 
-.task-tags {
-  padding: 2px 8px;
-  background: var(--gray-50, #f9fafb);
+.task-assignee-unassigned {
+  background: var(--gray-100, #f3f4f6);
+  color: var(--gray-500, #6b7280);
+  font-style: italic;
+}
+
+.task-tags-container {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.task-tag {
+  padding: 3px 8px;
   border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  background-color: var(--gray-100, #f3f4f6);
+  color: var(--gray-700, #374151);
+  display: inline-block;
 }
 
 .empty-state {

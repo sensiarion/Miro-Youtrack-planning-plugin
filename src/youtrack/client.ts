@@ -21,7 +21,9 @@ export async function searchIssues(params: SearchIssuesParams): Promise<YouTrack
   // YouTrack REST API: use query parameter for search
   // If query is empty, use default: all issues sorted by updated date desc
   const searchQuery = query.trim() || 'sort by: updated desc';
-  const searchUrl = `${baseUrl.replace(/\/$/, '')}/api/issues?query=${encodeURIComponent(searchQuery)}&fields=idReadable,summary,tags(name),customFields(name,value(name)),assignee(name,login)`;
+  // Request tag colors, localized state names, and assignee with nested fields
+  // Note: assignee needs to be requested with nested properties: assignee(id,login,name)
+  const searchUrl = `${baseUrl.replace(/\/$/, '')}/api/issues?query=${encodeURIComponent(searchQuery)}&fields=idReadable,summary,tags(name,color(background,foreground)),customFields(name,value(name,localizedName)),assignee(id,login,name)`;
   
   try {
     const response = await fetch(searchUrl, {
@@ -38,6 +40,18 @@ export async function searchIssues(params: SearchIssuesParams): Promise<YouTrack
     }
     
     const issues = await response.json();
+    
+    // Debug: log raw API response for first issue to check assignee structure
+    if (Array.isArray(issues) && issues.length > 0) {
+      const firstIssue = issues[0];
+      const assigneeField = firstIssue.customFields?.find((f: any) => f.name === 'Assignee');
+      console.log('[client] Raw API response (first issue):', {
+        idReadable: firstIssue.idReadable,
+        topLevelAssignee: firstIssue.assignee,
+        assigneeCustomField: assigneeField,
+        allCustomFields: firstIssue.customFields?.map((f: any) => ({ name: f.name, hasValue: !!f.value }))
+      });
+    }
     
     // Normalize each issue
     return (Array.isArray(issues) ? issues : []).map(issue => 
