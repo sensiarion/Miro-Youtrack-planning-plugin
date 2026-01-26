@@ -1,16 +1,64 @@
 import { ref } from 'vue';
 import { loadSyncState, saveSyncState, saveSettings, type SyncState } from '../storage';
-import { searchIssues } from '../youtrack/client';
+import { searchIssues, fetchIssuesLinks } from '../youtrack/client';
 import { YouTrackIssue } from '../youtrack/types';
-import { updateTaskShape, extractIssueUrlFromShape, getTaskColor, buildTaskMindmapContent } from '../miro/taskShape';
+import { updateTaskShape, getTaskColor, buildTaskMindmapContent } from '../miro/taskShape';
 import { getOrCreateNotFoundFrame, expandFrameIfNeeded, DEFAULT_FRAME_WIDTH, DEFAULT_FRAME_HEIGHT } from '../miro/notFoundFrame';
 import { METADATA_KEY, TASK_FILL_OPACITY, TASK_SHAPE_WIDTH, TASK_SHAPE_HEIGHT } from '../constants';
+import { createIssueConnector, getPluginConnectors, removeConnector } from '../miro/connectors';
 
 export function useSync() {
   const syncState = ref<SyncState>(loadSyncState());
   const isSyncing = ref(false);
   const syncError = ref<string | null>(null);
   const syncedTasks = ref<YouTrackIssue[]>([]);
+
+  function getItemContent(item: any): string {
+    if (typeof item?.content === 'string') {
+      return item.content;
+    }
+    if (typeof item?.nodeView?.content === 'string') {
+      return item.nodeView.content;
+    }
+    return '';
+  }
+
+  function extractIssueIdFromContent(content: string): string | null {
+    const match = content.match(/<a[^>]*>([^<]+)<\/a>/);
+    if (!match) {
+      return null;
+    }
+    return match[1].trim() || null;
+  }
+
+  function collectMatchingTaskShapes(
+    items: any[],
+    issuesById: Map<string, YouTrackIssue>
+  ): {
+    taskShapes: Array<{ shape: any; issueId: string; issue: YouTrackIssue }>;
+    syncedTasksList: YouTrackIssue[];
+  } {
+    const taskShapes: Array<{ shape: any; issueId: string; issue: YouTrackIssue }> = [];
+    const syncedTasksList: YouTrackIssue[] = [];
+
+    for (const item of items) {
+      const content = getItemContent(item);
+      const issueId = extractIssueIdFromContent(content);
+      if (!issueId) {
+        continue;
+      }
+
+      const issue = issuesById.get(issueId);
+      if (!issue) {
+        continue;
+      }
+
+      taskShapes.push({ shape: item, issueId, issue });
+      syncedTasksList.push(issue);
+    }
+
+    return { taskShapes, syncedTasksList };
+  }
 
   async function syncTasks(
     syncQuery: string,
@@ -34,10 +82,10 @@ export function useSync() {
         statusFieldName,
       });
 
-      // Build map by issue URL
-      const issueMap = new Map<string, YouTrackIssue>();
+      // Build map by issue ID (idReadable)
+      const issuesById = new Map<string, YouTrackIssue>();
       issues.forEach(issue => {
-        issueMap.set(issue.url, issue);
+        issuesById.set(issue.idReadable, issue);
       });
 
       // Get all mindmap nodes and shapes on board (for backward compatibility)
@@ -45,68 +93,9 @@ export function useSync() {
       const allShapes = await miro.board.get({ type: 'shape' });
       const allItems = [...allMindmapNodes, ...allShapes];
       
-      // Identify plugin-managed task shapes and build synced tasks list
-      const taskShapes: Array<{ shape: any; issueUrl: string | null; issue: YouTrackIssue | null }> = [];
-      const syncedTasksList: YouTrackIssue[] = [];
-      
-      for (const shape of allItems) {
-        let issueUrl: string | null = null;
-        let issue: YouTrackIssue | null = null;
-        
-        // Try metadata first (primary method)
-        try {
-          const metadata = await shape.getMetadata(METADATA_KEY);
-          if (metadata?.issueUrl) {
-            issueUrl = metadata.issueUrl;
-            issue = issueMap.get(issueUrl) || null;
-            taskShapes.push({ shape, issueUrl, issue });
-            
-            if (issue) {
-              syncedTasksList.push(issue);
-            } else {
-              // If issue not found in sync query results, try to extract from shape content
-              const content = shape.content || '';
-              const idMatch = content.match(/<a[^>]*>([^<]+)<\/a>/);
-              const summaryMatch = content.match(/<\/a>\s*([^(]+)/);
-              if (idMatch && summaryMatch) {
-                syncedTasksList.push({
-                  idReadable: idMatch[1],
-                  summary: summaryMatch[1].trim(),
-                  tags: [],
-                  assignee: 'Unassigned',
-                  stateName: metadata.stateName || '',
-                  stateNameLocalized: null,
-                  url: issueUrl,
-                });
-              }
-            }
-            continue;
-          }
-        } catch (e) {
-          // Metadata not found or error
-        }
-        
-        // Fallback: parse from content (for shapes) or linkedTo (for mindmap nodes)
-        if (shape.type === 'mindmap_node' && shape.linkedTo) {
-          issueUrl = shape.linkedTo;
-          issue = issueMap.get(issueUrl) || null;
-          taskShapes.push({ shape, issueUrl, issue });
-          
-          if (issue) {
-            syncedTasksList.push(issue);
-          }
-        } else {
-          issueUrl = extractIssueUrlFromShape(shape.content || '');
-          if (issueUrl) {
-            issue = issueMap.get(issueUrl) || null;
-            taskShapes.push({ shape, issueUrl, issue });
-            
-            if (issue) {
-              syncedTasksList.push(issue);
-            }
-          }
-        }
-      }
+      // Identify matching task shapes by href task id only
+      const { taskShapes: initialTaskShapes, syncedTasksList } = collectMatchingTaskShapes(allItems, issuesById);
+      const taskShapes = [...initialTaskShapes];
       
       // Update synced tasks list
       syncedTasks.value = syncedTasksList;
@@ -115,103 +104,75 @@ export function useSync() {
       let createdCount = 0;
 
       // Update existing task shapes
-      for (const { shape, issueUrl } of taskShapes) {
-        if (!issueUrl) continue;
-        
-        const issue = issueMap.get(issueUrl);
-        if (issue) {
-          await updateTaskShape(shape, issue);
-          updatedCount++;
-          issueMap.delete(issueUrl);
-        }
+      const remainingIssuesById = new Map(issuesById);
+      for (const { shape, issueId, issue } of taskShapes) {
+        await updateTaskShape(shape, issue);
+        updatedCount++;
+        remainingIssuesById.delete(issueId);
       }
 
       // Create missing issues in "Not found" frame
-      if (issueMap.size > 0) {
+      if (remainingIssuesById.size > 0) {
         const notFoundFrame = await getOrCreateNotFoundFrame();
         
         // Spacing between cards (horizontal and vertical offset)
         // Use card dimensions + gap to prevent overlap
-        const horizontalSpacing = TASK_SHAPE_WIDTH + 50; // Card width + 50px gap
-        const verticalSpacing = TASK_SHAPE_HEIGHT + 50; // Card height + 50px gap
-        const padding = 100;
-        const itemsPerRow = 4;
+        const gap = 50;
+        const padding = 50; // Padding from frame edges
+
+        // Ensure frame is large enough for the grid layout
+        let frame = notFoundFrame;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const frameWidth = frame.width || DEFAULT_FRAME_WIDTH;
+          const availableWidth = frameWidth - padding * 2;
+          const itemsPerRow = Math.max(1, Math.floor((availableWidth + gap) / (TASK_SHAPE_WIDTH + gap)));
+          const rows = Math.ceil(remainingIssuesById.size / itemsPerRow);
+          const requiredWidth = itemsPerRow * (TASK_SHAPE_WIDTH + gap) - gap + padding * 2;
+          const requiredHeight = rows * (TASK_SHAPE_HEIGHT + gap) - gap + padding * 2;
+
+          await expandFrameIfNeeded(frame, remainingIssuesById.size, itemsPerRow, TASK_SHAPE_WIDTH, TASK_SHAPE_HEIGHT, gap);
+          await frame.sync();
+
+          // Re-fetch frame to get updated dimensions after sync
+          const updatedFrame = await miro.board.get({ id: frame.id });
+          frame = updatedFrame && updatedFrame.length > 0 ? updatedFrame[0] : frame;
+
+          const newWidth = frame.width || DEFAULT_FRAME_WIDTH;
+          const newHeight = frame.height || DEFAULT_FRAME_HEIGHT;
+          if (newWidth >= requiredWidth && newHeight >= requiredHeight) {
+            break;
+          }
+        }
+
+        const frameWidth = frame.width || DEFAULT_FRAME_WIDTH;
+        const frameHeight = frame.height || DEFAULT_FRAME_HEIGHT;
         
-        await expandFrameIfNeeded(notFoundFrame, issueMap.size, itemsPerRow, TASK_SHAPE_WIDTH, TASK_SHAPE_HEIGHT, horizontalSpacing);
-        await notFoundFrame.sync();
+        // Calculate frame boundaries (frame.x and frame.y are center coordinates)
+        const frameLeft = frame.x - frameWidth / 2;
+        const frameTop = frame.y - frameHeight / 2;
         
-        const frameWidth = notFoundFrame.width || DEFAULT_FRAME_WIDTH;
-        const frameHeight = notFoundFrame.height || DEFAULT_FRAME_HEIGHT;
-        
-        // Calculate frame boundaries
-        const frameLeft = notFoundFrame.x - frameWidth / 2;
-        const frameTop = notFoundFrame.y - frameHeight / 2;
-        const frameRight = notFoundFrame.x + frameWidth / 2;
-        const frameBottom = notFoundFrame.y + frameHeight / 2;
-        
-        // Track positions of created cards to prevent overlap
-        const createdPositions: Array<{ x: number; y: number; width: number; height: number }> = [];
+        // Calculate available space for cards (accounting for padding and card dimensions)
+        const cardHalfWidth = TASK_SHAPE_WIDTH / 2;
+        const cardHalfHeight = TASK_SHAPE_HEIGHT / 2;
+        const availableLeft = frameLeft + padding + cardHalfWidth;
+        const availableTop = frameTop + padding + cardHalfHeight;
+        const availableWidth = frameWidth - padding * 2;
+        const itemsPerRow = Math.max(1, Math.floor((availableWidth + gap) / (TASK_SHAPE_WIDTH + gap)));
+        const stepX = TASK_SHAPE_WIDTH + gap;
+        const stepY = TASK_SHAPE_HEIGHT + gap;
         
         let index = 0;
-        for (const issue of issueMap.values()) {
+        for (const issue of remainingIssuesById.values()) {
           const color = getTaskColor(issue.stateName);
           const content = buildTaskMindmapContent(issue);
           
           // Calculate grid position
           const row = Math.floor(index / itemsPerRow);
           const col = index % itemsPerRow;
-          
-          // Calculate base position relative to frame top-left
-          // Position is center of card, so we need to account for card dimensions
-          const baseRelX = padding + col * horizontalSpacing + TASK_SHAPE_WIDTH / 2;
-          const baseRelY = padding + row * verticalSpacing + TASK_SHAPE_HEIGHT / 2;
-          
-          // Convert to absolute coordinates (center of card)
-          let shapeX = frameLeft + baseRelX;
-          let shapeY = frameTop + baseRelY;
-          
-          // Check for overlaps with previously created cards and adjust if needed
-          const cardHalfWidth = TASK_SHAPE_WIDTH / 2;
-          const cardHalfHeight = TASK_SHAPE_HEIGHT / 2;
-          const minDistanceX = TASK_SHAPE_WIDTH + 50; // Minimum horizontal distance
-          const minDistanceY = TASK_SHAPE_HEIGHT + 50; // Minimum vertical distance
-          
-          let adjustedX = shapeX;
-          let adjustedY = shapeY;
-          let hasOverlap = true;
-          let attempts = 0;
-          const maxAttempts = 50;
-          
-          // Find a non-overlapping position
-          while (hasOverlap && attempts < maxAttempts) {
-            hasOverlap = false;
-            
-            for (const pos of createdPositions) {
-              const distanceX = Math.abs(adjustedX - pos.x);
-              const distanceY = Math.abs(adjustedY - pos.y);
-              
-              // Check if cards would overlap (considering card dimensions)
-              if (distanceX < minDistanceX && distanceY < minDistanceY) {
-                hasOverlap = true;
-                break;
-              }
-            }
-            
-            if (hasOverlap) {
-              // Move to next grid position
-              attempts++;
-              const newRow = Math.floor((index + attempts) / itemsPerRow);
-              const newCol = (index + attempts) % itemsPerRow;
-              
-              adjustedX = frameLeft + padding + newCol * horizontalSpacing + TASK_SHAPE_WIDTH / 2;
-              adjustedY = frameTop + padding + newRow * verticalSpacing + TASK_SHAPE_HEIGHT / 2;
-            }
-          }
-          
-          // Ensure position is within frame bounds (with margin for card size)
-          const shapeMargin = Math.max(TASK_SHAPE_WIDTH, TASK_SHAPE_HEIGHT) / 2;
-          const clampedX = Math.max(frameLeft + shapeMargin, Math.min(frameRight - shapeMargin, adjustedX));
-          const clampedY = Math.max(frameTop + shapeMargin, Math.min(frameBottom - shapeMargin, adjustedY));
+
+          // Position is center of card
+          const finalX = availableLeft + col * stepX;
+          const finalY = availableTop + row * stepY;
           
           const node = await miro.board.experimental.createMindmapNode({
             nodeView: {
@@ -225,8 +186,8 @@ export function useSync() {
                 borderStyle: 'normal',
               },
             },
-            x: clampedX,
-            y: clampedY,
+            x: finalX,
+            y: finalY,
           });
           
           node.linkedTo = issue.url;
@@ -237,22 +198,20 @@ export function useSync() {
             issueUrl: issue.url,
             stateName: issue.stateName,
             stateNameLocalized: issue.stateNameLocalized,
-            tags: issue.tags,
+            tags: issue.tags.map(t => ({ name: t.name, color: t.color })),
             assignee: issue.assignee,
-          });
-          
-          // Store position and dimensions of created card to prevent future overlaps
-          createdPositions.push({ 
-            x: clampedX, 
-            y: clampedY, 
-            width: TASK_SHAPE_WIDTH, 
-            height: TASK_SHAPE_HEIGHT 
           });
           
           createdCount++;
           index++;
+
+          // Track newly created nodes for connector sync
+          taskShapes.push({ shape: node, issueId: issue.idReadable, issue });
         }
       }
+
+      // Sync connectors: fetch links and create/update/remove connectors
+      await syncConnectors(baseUrl, token, taskShapes);
 
       // Save sync state
       const newSyncState: SyncState = {
@@ -273,6 +232,126 @@ export function useSync() {
       console.error('Failed to sync tasks:', error);
     } finally {
       isSyncing.value = false;
+    }
+  }
+
+  /**
+   * Sync connectors between issues based on YouTrack links
+   * Follows strict workflow:
+   * 1. Build map: youtrack_id -> board node id
+   * 2. Build map: (type, from youtrack id, to youtrack_id) -> connector node id
+   * 3. Flush all existing links between task nodes (only between them)
+   * 4. Rewrite onto actual links
+   */
+  async function syncConnectors(
+    baseUrl: string,
+    token: string,
+    taskShapes: Array<{ shape: any; issueId: string; issue: YouTrackIssue }>
+  ): Promise<void> {
+    try {
+      // Step 1: Build map: youtrack_id -> board node id
+      const youtrackIdToNodeIdMap = new Map<string, string>();
+      const nodeIdToYoutrackIdMap = new Map<string, string>();
+      const nodeIdToShapeMap = new Map<string, any>();
+
+      for (const { shape, issueId } of taskShapes) {
+        if (!shape?.id) {
+          continue;
+        }
+        youtrackIdToNodeIdMap.set(issueId, shape.id);
+        nodeIdToYoutrackIdMap.set(shape.id, issueId);
+        nodeIdToShapeMap.set(shape.id, shape);
+      }
+      
+      if (youtrackIdToNodeIdMap.size === 0) {
+        return; // No task nodes on board
+      }
+      
+      // Step 2: Build map: (type, from youtrack id, to youtrack_id) -> connector node id
+      const existingConnectorsMap = new Map<string, string>(); // "linkType:fromId:toId" -> connector id
+      const existingConnectors = await getPluginConnectors();
+      
+      for (const connector of existingConnectors) {
+        try {
+          const metadata = await connector.getMetadata('youtrack-connector');
+          if (metadata && metadata.startIssueId && metadata.endIssueId) {
+            const startYoutrackId = nodeIdToYoutrackIdMap.get(metadata.startIssueId);
+            const endYoutrackId = nodeIdToYoutrackIdMap.get(metadata.endIssueId);
+            
+            // Only track connectors between task nodes (both ends are task nodes)
+            if (startYoutrackId && endYoutrackId) {
+              const linkKey = `${metadata.linkType}:${startYoutrackId}:${endYoutrackId}`;
+              existingConnectorsMap.set(linkKey, connector.id);
+            }
+          }
+        } catch (e) {
+          // Skip connectors without proper metadata
+        }
+      }
+      
+      // Step 3: Flush all existing links between task nodes (only between them)
+      // Remove all connectors that connect two task nodes
+      for (const [, connectorId] of existingConnectorsMap.entries()) {
+        try {
+          const connector = existingConnectors.find(c => c.id === connectorId);
+          if (connector) {
+            console.log("removing connector", connector);
+            await removeConnector(connector);
+          }
+        } catch (e) {
+          console.warn('Failed to remove connector during flush:', e);
+        }
+      }
+      
+      // Step 4: Fetch links and rewrite onto actual links
+      const issueIdsOnBoard = Array.from(youtrackIdToNodeIdMap.keys());
+      const linksMap = await fetchIssuesLinks(baseUrl, token, issueIdsOnBoard);
+      
+      // Track created connectors to avoid duplicates (for bidirectional links)
+      const createdConnectorKeys = new Set<string>();
+      
+      // Create connectors for all current links
+      for (const [issueId, links] of linksMap.entries()) {
+        const sourceNodeId = youtrackIdToNodeIdMap.get(issueId);
+        if (!sourceNodeId) continue;
+        
+        const sourceShape = nodeIdToShapeMap.get(sourceNodeId);
+        if (!sourceShape) continue;
+        
+        for (const link of links) {
+          for (const linkedIssue of link.issues) {
+            // Skip self-links
+            if (linkedIssue.idReadable === issueId) continue;
+            
+            const targetNodeId = youtrackIdToNodeIdMap.get(linkedIssue.idReadable);
+            if (!targetNodeId) continue; // Target not on board
+            
+            const targetShape = nodeIdToShapeMap.get(targetNodeId);
+            if (!targetShape) continue;
+            
+            // Create unique key to avoid duplicates (sorted IDs for bidirectional links)
+            const sortedIds = [issueId, linkedIssue.idReadable].sort();
+            const connectorKey = `${link.linkType.name}:${sortedIds[0]}:${sortedIds[1]}`;
+            
+            if (createdConnectorKeys.has(connectorKey)) {
+              continue; // Already created this connector
+            }
+            
+            // Create connector for this link
+            await createIssueConnector(
+              sourceShape,
+              targetShape,
+              link.linkType.name,
+              link.linkType.sourceToTarget
+            );
+            
+            createdConnectorKeys.add(connectorKey);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to sync connectors:', error);
+      // Don't throw - connector sync failure shouldn't break the main sync
     }
   }
 

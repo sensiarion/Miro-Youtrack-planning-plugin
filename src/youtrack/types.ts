@@ -4,6 +4,20 @@ export interface YouTrackTag {
   color: string | null;
 }
 
+export interface YouTrackIssueLink {
+  linkType: {
+    name: string;
+    sourceToTarget: string; // e.g., "depends on"
+    targetToSource: string; // e.g., "is required for"
+  };
+  issues: Array<{
+    id: string;
+    idReadable: string;
+    summary: string;
+  }>;
+  direction: 'outward' | 'inward'; // outward = this issue links to others, inward = others link to this
+}
+
 export interface YouTrackIssue {
   idReadable: string;
   summary: string;
@@ -12,4 +26,5 @@ export interface YouTrackIssue {
   stateName: string;
   stateNameLocalized: string | null;
   url: string;
+  links?: YouTrackIssueLink[]; // Links fetched separately
 }
