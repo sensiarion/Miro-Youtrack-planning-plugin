@@ -7,11 +7,17 @@ import { getOrCreateNotFoundFrame, expandFrameIfNeeded, DEFAULT_FRAME_WIDTH, DEF
 import { METADATA_KEY, TASK_FILL_OPACITY, TASK_SHAPE_WIDTH, TASK_SHAPE_HEIGHT } from '../constants';
 import { createIssueConnector, getPluginConnectors, removeConnector } from '../miro/connectors';
 
+type SyncedTaskItem = {
+  issue: YouTrackIssue;
+  itemId: string;
+};
+
 export function useSync() {
   const syncState = ref<SyncState>(loadSyncState());
   const isSyncing = ref(false);
   const syncError = ref<string | null>(null);
   const syncedTasks = ref<YouTrackIssue[]>([]);
+  const syncedTaskItems = ref<SyncedTaskItem[]>([]);
 
   function getItemContent(item: any): string {
     if (typeof item?.content === 'string') {
@@ -31,15 +37,47 @@ export function useSync() {
     return match[1].trim() || null;
   }
 
+  function extractIssueUrlFromContent(content: string): string {
+    const match = content.match(/<a\s+href=["']([^"']+)["']/i);
+    return match ? match[1] : '';
+  }
+
+  function stripHtml(text: string): string {
+    return text
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<\/?[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function buildIssueFromContent(content: string, issueId: string): YouTrackIssue | null {
+    const summaryMatch = content.match(/<\/a>\s*([^(]+)/);
+    if (!summaryMatch) {
+      return null;
+    }
+
+    return {
+      idReadable: issueId,
+      summary: stripHtml(summaryMatch[1]),
+      tags: [],
+      assignee: 'Unassigned',
+      stateName: '',
+      stateNameLocalized: null,
+      url: extractIssueUrlFromContent(content),
+    };
+  }
+
   function collectMatchingTaskShapes(
     items: any[],
-    issuesById: Map<string, YouTrackIssue>
+    issuesById?: Map<string, YouTrackIssue>
   ): {
     taskShapes: Array<{ shape: any; issueId: string; issue: YouTrackIssue }>;
     syncedTasksList: YouTrackIssue[];
+    syncedTaskItems: SyncedTaskItem[];
   } {
     const taskShapes: Array<{ shape: any; issueId: string; issue: YouTrackIssue }> = [];
     const syncedTasksList: YouTrackIssue[] = [];
+    const syncedTaskItems: SyncedTaskItem[] = [];
 
     for (const item of items) {
       const content = getItemContent(item);
@@ -48,16 +86,55 @@ export function useSync() {
         continue;
       }
 
-      const issue = issuesById.get(issueId);
-      if (!issue) {
+      const issue = issuesById?.get(issueId) ?? buildIssueFromContent(content, issueId);
+      if (!issue || !item?.id) {
         continue;
       }
 
       taskShapes.push({ shape: item, issueId, issue });
       syncedTasksList.push(issue);
+      syncedTaskItems.push({ issue, itemId: item.id });
     }
 
-    return { taskShapes, syncedTasksList };
+    return { taskShapes, syncedTasksList, syncedTaskItems };
+  }
+
+  async function refreshSyncedTasks(): Promise<void> {
+    try {
+      const allMindmapNodes = await miro.board.experimental.get({ type: 'mindmap_node' });
+      const allShapes = await miro.board.get({ type: 'shape' });
+      const allItems = [...allMindmapNodes, ...allShapes];
+
+      const { syncedTasksList, syncedTaskItems: boardTaskItems } = collectMatchingTaskShapes(allItems);
+      syncedTasks.value = syncedTasksList;
+      syncedTaskItems.value = boardTaskItems;
+    } catch (error) {
+      console.warn('Failed to refresh synced tasks:', error);
+    }
+  }
+
+  async function focusOnTask(issueId: string): Promise<void> {
+    const item = syncedTaskItems.value.find(task => task.issue.idReadable === issueId);
+    if (!item) {
+      return;
+    }
+
+    const fetched = await miro.board.get({ id: item.itemId });
+    const resolved = Array.isArray(fetched) ? fetched[0] : null;
+    if (!resolved) {
+      return;
+    }
+
+    try {
+      const viewport = miro.board.viewport as any;
+      await viewport.zoomTo(resolved, { padding: 200 });
+    } catch (error) {
+      try {
+        await miro.board.viewport.zoomTo(resolved);
+      } catch (fallbackError) {
+        console.warn('Failed to zoom to task:', fallbackError);
+      }
+    }
   }
 
   async function syncTasks(
@@ -94,11 +171,13 @@ export function useSync() {
       const allItems = [...allMindmapNodes, ...allShapes];
       
       // Identify matching task shapes by href task id only
-      const { taskShapes: initialTaskShapes, syncedTasksList } = collectMatchingTaskShapes(allItems, issuesById);
+      const { taskShapes: initialTaskShapes, syncedTasksList, syncedTaskItems: initialTaskItems } =
+        collectMatchingTaskShapes(allItems, issuesById);
       const taskShapes = [...initialTaskShapes];
       
       // Update synced tasks list
       syncedTasks.value = syncedTasksList;
+      syncedTaskItems.value = initialTaskItems;
 
       let updatedCount = 0;
       let createdCount = 0;
@@ -207,6 +286,8 @@ export function useSync() {
 
           // Track newly created nodes for connector sync
           taskShapes.push({ shape: node, issueId: issue.idReadable, issue });
+          syncedTasks.value.push(issue);
+          syncedTaskItems.value.push({ issue, itemId: node.id });
         }
       }
 
@@ -360,6 +441,9 @@ export function useSync() {
     isSyncing,
     syncError,
     syncedTasks,
+    syncedTaskItems,
     syncTasks,
+    refreshSyncedTasks,
+    focusOnTask,
   };
 }

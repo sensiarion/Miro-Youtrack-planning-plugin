@@ -4,11 +4,17 @@ import { YouTrackIssue } from '../youtrack/types';
 interface Props {
   issue: YouTrackIssue;
   draggable?: boolean;
+  clickable?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   draggable: false,
+  clickable: false,
 });
+
+const emit = defineEmits<{
+  (e: 'click'): void;
+}>();
 
 /**
  * Get contrast color (black or white) for a given background color
@@ -25,8 +31,12 @@ function getContrastColor(hexColor: string): string {
 
 <template>
   <div 
-    :class="['task-item', { 'miro-draggable mindmap-card': draggable }]"
+    :class="[
+      'task-item',
+      { 'miro-draggable mindmap-card': draggable, 'task-item-clickable': clickable }
+    ]"
     :data-issue="draggable ? JSON.stringify(issue) : undefined"
+    @click="clickable ? emit('click') : undefined"
   >
     <div class="task-header">
       <div class="task-id">{{ issue.idReadable }}</div>
@@ -47,7 +57,7 @@ function getContrastColor(hexColor: string): string {
       <span v-if="issue.stateNameLocalized || issue.stateName" class="task-state">
         {{ issue.stateNameLocalized || issue.stateName }}
       </span>
-      <span class="task-assignee" :class="{ 'task-assignee-unassigned': issue.assignee === 'Unassigned' }">
+      <span v-if="issue.assignee !== 'Unassigned'" class="task-assignee">
         👤 {{ issue.assignee }}
       </span>
     </div>
@@ -75,6 +85,10 @@ function getContrastColor(hexColor: string): string {
   transition: all 0.2s;
   user-select: none;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.task-item-clickable {
+  cursor: pointer;
 }
 
 .mindmap-card {

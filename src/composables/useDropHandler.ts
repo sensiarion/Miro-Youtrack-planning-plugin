@@ -38,6 +38,9 @@ export function useDropHandler() {
       const issue: YouTrackIssue = JSON.parse(issueData);
       console.log('Creating task node for issue:', issue.idReadable, 'assignee:', issue.assignee);
       await createTaskShapeAt(issue, event.x, event.y);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('synced-tasks-refresh'));
+      }
     } catch (error) {
       console.error('Failed to create task shape on drop:', error);
     } finally {

@@ -1,14 +1,23 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { loadSettings } from '../storage';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useSettings } from '../composables/useSettings';
 import { useSync } from '../composables/useSync';
 import TaskItem from './TaskItem.vue';
 
 const { hasValidSettings, getEffectiveSettings, settings } = useSettings();
-const { syncState, isSyncing, syncError, syncedTasks, syncTasks: performSync } = useSync();
+const {
+  syncState,
+  isSyncing,
+  syncError,
+  syncedTasks,
+  syncedTaskItems,
+  syncTasks: performSync,
+  refreshSyncedTasks,
+  focusOnTask,
+} = useSync();
 
 const syncQuery = ref(settings.value.syncQuery || '');
+const searchQuery = ref('');
 
 async function handleSync() {
   if (!hasValidSettings.value) {
@@ -20,6 +29,42 @@ async function handleSync() {
   // Update local settings ref to reflect saved query
   settings.value.syncQuery = syncQuery.value;
 }
+
+const filteredTaskItems = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase();
+  if (!query) {
+    return syncedTaskItems.value;
+  }
+
+  return syncedTaskItems.value.filter(item => {
+    const issue = item.issue;
+    const tags = issue.tags.map(tag => tag.name).join(' ');
+    return [
+      issue.idReadable,
+      issue.summary,
+      issue.assignee,
+      issue.stateNameLocalized || issue.stateName,
+      tags,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+      .includes(query);
+  });
+});
+
+onMounted(async () => {
+  await refreshSyncedTasks();
+  if (typeof window !== 'undefined') {
+    const handler = () => {
+      refreshSyncedTasks();
+    };
+    window.addEventListener('synced-tasks-refresh', handler);
+    onUnmounted(() => {
+      window.removeEventListener('synced-tasks-refresh', handler);
+    });
+  }
+});
 </script>
 
 <template>
@@ -42,6 +87,17 @@ async function handleSync() {
         <span v-if="isSyncing">Syncing...</span>
         <span v-else>Sync Now</span>
       </button>
+    </div>
+
+    <div class="form-group">
+      <label for="sync-search">Search synced tasks:</label>
+      <input
+        id="sync-search"
+        v-model="searchQuery"
+        type="text"
+        placeholder="Search by id, summary, assignee, tag..."
+        class="input"
+      />
     </div>
 
     <div v-if="syncError" class="error">{{ syncError }}</div>
@@ -68,17 +124,19 @@ async function handleSync() {
       </div>
     </div>
 
-    <div v-if="syncedTasks.length > 0" class="synced-tasks-section">
-      <h3>Synced Tasks on Board ({{ syncedTasks.length }})</h3>
+    <div class="synced-tasks-section">
+      <h3>Synced Tasks on Board ({{ filteredTaskItems.length }})</h3>
       <div class="task-list">
         <TaskItem
-          v-for="issue in syncedTasks"
-          :key="issue.idReadable"
-          :issue="issue"
+          v-for="item in filteredTaskItems"
+          :key="item.issue.idReadable"
+          :issue="item.issue"
+          :clickable="true"
+          @click="focusOnTask(item.issue.idReadable)"
         />
       </div>
     </div>
-    <div v-else-if="!isSyncing && hasValidSettings" class="empty-state">
+    <div v-if="filteredTaskItems.length === 0 && !isSyncing && hasValidSettings" class="empty-state">
       No synced tasks found on board. Run a sync to see tasks here.
     </div>
   </div>
