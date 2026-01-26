@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   yotrack-plan-mindmap:
+    image: registry.corp.uriit.ru/packages/miro-youtrack-plugin:latest
     build:
       context: .
       dockerfile: Dockerfile
