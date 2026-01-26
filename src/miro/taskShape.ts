@@ -46,7 +46,7 @@ export function buildTaskMindmapContent(issue: YouTrackIssue): string {
 /**
  * Get contrast color (black or white) for a given background color
  */
-function getContrastColor(hexColor: string): string {
+export function getContrastColor(hexColor: string): string {
   // Remove # if present
   const hex = hexColor.replace('#', '');
   
@@ -87,7 +87,7 @@ export async function createTaskShapeAt(issue: YouTrackIssue, x: number, y: numb
       shape: 'round_rectangle',
       content,
       style: {
-        color: '#1a1a1a',
+        color: color, // Node color based on task status (Yellow/Green/Purple)
         fillOpacity: TASK_FILL_OPACITY,
         fontSize: 14,
         borderStyle: 'normal',
@@ -99,10 +99,9 @@ export async function createTaskShapeAt(issue: YouTrackIssue, x: number, y: numb
   
   node.linkedTo = issue.url;
   
-  // Set fillColor after creation (cannot be set during creation)
-  if (node.nodeView && node.nodeView.style) {
-    node.nodeView.style.fillColor = color;
-  }
+  // Set fillColor directly on the node (not in style)
+  // According to Miro API, fillColor is a property of the board item, not style
+  (node as any).fillColor = color; // Background color based on task status
   
   await node.sync();
   
@@ -124,11 +123,13 @@ export async function updateTaskShape(node: any, issue: YouTrackIssue): Promise<
   const color = getTaskColor(issue.stateName);
   const content = buildTaskMindmapContent(issue);
   
-  // Update node view content and color
+  // Update node view content and colors
   node.nodeView.content = content;
   if (node.nodeView.style) {
-    node.nodeView.style.fillColor = color; // Update background color based on state
+    node.nodeView.style.color = color; // Update node color based on task status (Yellow/Green/Purple)
   }
+  // Update fillColor directly on the node (not in style)
+  node.fillColor = color; // Background color based on task status
   node.linkedTo = issue.url;
   
   await node.sync();
