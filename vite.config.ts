@@ -8,6 +8,7 @@ dns.setDefaultResultOrder('verbatim');
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [vue()],
+  base: process.env.VITE_BASE_PATH || '/',
   server: {
     port: 3000,
   },
