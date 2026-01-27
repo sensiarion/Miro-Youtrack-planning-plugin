@@ -49,9 +49,6 @@ jobs:
           # Override by setting repository secret VITE_BASE_PATH
           VITE_BASE_PATH: ${{ secrets.VITE_BASE_PATH || steps.base_path.outputs.base_path }}
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
