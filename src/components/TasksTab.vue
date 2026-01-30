@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { searchIssues } from '../youtrack/client';
 import { YouTrackIssue } from '../youtrack/types';
 import { saveSettings } from '../storage';
 import TaskItem from './TaskItem.vue';
 import { useSettings } from '../composables/useSettings';
+import { useSync } from '../composables/useSync';
 
 interface Props {
   initialQuery?: string;
@@ -15,11 +16,25 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const { hasValidSettings, getEffectiveSettings } = useSettings();
+const { syncedTaskItems, refreshSyncedTasks, focusOnTask } = useSync();
 
 const taskQuery = ref(props.initialQuery);
 const taskIssues = ref<YouTrackIssue[]>([]);
 const isLoadingTasks = ref(false);
 const taskError = ref<string | null>(null);
+
+const boardCountByIssueId = computed(() => {
+  const map = new Map<string, number>();
+  for (const { issue } of syncedTaskItems.value) {
+    const id = issue.idReadable;
+    map.set(id, (map.get(id) ?? 0) + 1);
+  }
+  return map;
+});
+
+onMounted(async () => {
+  await refreshSyncedTasks();
+});
 
 async function loadTasks(queryOverride?: string) {
   if (!hasValidSettings.value) {
@@ -41,17 +56,12 @@ async function loadTasks(queryOverride?: string) {
       statusFieldName,
     });
     taskIssues.value = issues;
-    
-    // Debug: log issues to check assignee
-    if (issues.length > 0) {
-      console.log('Loaded issues:', issues.length);
-      console.log('First issue:', issues[0]);
-      console.log('First issue assignee:', issues[0].assignee);
-    }
-    
+
     // Save task query to Miro board storage
     await saveSettings({ taskQuery: queryToUse });
     taskQuery.value = queryToUse;
+
+    await refreshSyncedTasks();
   } catch (error: any) {
     taskError.value = error.message || 'Failed to load tasks';
     console.error('Failed to load tasks:', error);
@@ -102,6 +112,8 @@ defineExpose<{
         :key="issue.idReadable"
         :issue="issue"
         :draggable="true"
+        :on-board-count="boardCountByIssueId.get(issue.idReadable) ?? 0"
+        @navigate-to-board="focusOnTask"
       />
     </div>
     <div v-else-if="!isLoadingTasks && !taskError && hasValidSettings" class="empty-state">

@@ -124,24 +124,36 @@ export function useSync() {
     }
   }
 
+  const FOCUS_ZOOM_OUT_FACTOR = 0.82;
+  const FOCUS_SELECT_DURATION_MS = 2200;
+
   async function focusOnTask(issueId: string): Promise<void> {
-    const item = syncedTaskItems.value.find(task => task.issue.idReadable === issueId);
-    if (!item) {
+    const itemsForIssue = syncedTaskItems.value.filter(
+      task => task.issue.idReadable === issueId
+    );
+    if (itemsForIssue.length === 0) {
       return;
     }
 
-    const fetched = await miro.board.get({ id: item.itemId });
-    const resolved = Array.isArray(fetched) ? fetched[0] : null;
-    if (!resolved) {
+    const itemIds = itemsForIssue.map(i => i.itemId);
+    const fetched = await miro.board.get({ id: itemIds });
+    const resolved = Array.isArray(fetched) ? fetched : [fetched];
+    if (resolved.length === 0) {
       return;
     }
 
     try {
-      const viewport = miro.board.viewport as any;
-      await viewport.zoomTo(resolved, { padding: 200 });
+      await miro.board.viewport.zoomTo(resolved);
+      const zoom = await miro.board.viewport.getZoom();
+      await miro.board.viewport.setZoom(zoom * FOCUS_ZOOM_OUT_FACTOR);
+
+      await miro.board.select({ id: itemIds });
+      setTimeout(() => {
+        miro.board.deselect({ id: itemIds }).catch(() => {});
+      }, FOCUS_SELECT_DURATION_MS);
     } catch (error) {
       try {
-        await miro.board.viewport.zoomTo(resolved);
+        await miro.board.viewport.zoomTo(resolved.length === 1 ? resolved[0] : resolved);
       } catch (fallbackError) {
         console.warn('Failed to zoom to task:', fallbackError);
       }

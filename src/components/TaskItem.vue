@@ -5,15 +5,18 @@ interface Props {
   issue: YouTrackIssue;
   draggable?: boolean;
   clickable?: boolean;
+  onBoardCount?: number;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   draggable: false,
   clickable: false,
+  onBoardCount: 0,
 });
 
 const emit = defineEmits<{
   (e: 'click'): void;
+  (e: 'navigate-to-board', issueId: string): void;
 }>();
 
 /**
@@ -40,17 +43,28 @@ function getContrastColor(hexColor: string): string {
   >
     <div class="task-header">
       <div class="task-id">{{ issue.idReadable }}</div>
-      <a 
-        :href="issue.url" 
-        target="_blank" 
-        class="task-link-icon"
-        title="Open in YouTrack"
-        @click.stop
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M12 3.33333V8M12 8L9.33333 5.33333M12 8L9.33333 10.6667M8 12.6667H3.33333C2.59695 12.6667 2 12.0697 2 11.3333V4.66667C2 3.93029 2.59695 3.33333 3.33333 3.33333H8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </a>
+      <div class="task-header-right">
+        <a 
+          :href="issue.url" 
+          target="_blank" 
+          class="task-link-icon"
+          title="Open in YouTrack"
+          @click.stop
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 3.33333V8M12 8L9.33333 5.33333M12 8L9.33333 10.6667M8 12.6667H3.33333C2.59695 12.6667 2 12.0697 2 11.3333V4.66667C2 3.93029 2.59695 3.33333 3.33333 3.33333H8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </a>
+        <button
+          v-if="onBoardCount > 0"
+          type="button"
+          class="on-board-badge"
+          :title="`${onBoardCount} on board – click to go`"
+          @click.stop="emit('navigate-to-board', issue.idReadable)"
+        >
+          x{{ onBoardCount }}
+        </button>
+      </div>
     </div>
     <div class="task-summary">{{ issue.summary }}</div>
     <div class="task-meta">
@@ -120,6 +134,31 @@ function getContrastColor(hexColor: string): string {
   color: var(--blue-600, #2563eb);
   font-size: 15px;
   letter-spacing: -0.02em;
+}
+
+.task-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.on-board-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--red-100, #fee2e2);
+  color: var(--red-700, #b91c1c);
+  border: 1px solid var(--red-300, #fca5a5);
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.on-board-badge:hover {
+  background: var(--red-200, #fecaca);
+  color: var(--red-800, #991b1b);
 }
 
 .task-link-icon {

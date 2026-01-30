@@ -31,6 +31,15 @@ async function handleSync() {
   settings.value.syncQuery = syncQuery.value;
 }
 
+const boardCountByIssueId = computed(() => {
+  const map = new Map<string, number>();
+  for (const { issue } of syncedTaskItems.value) {
+    const id = issue.idReadable;
+    map.set(id, (map.get(id) ?? 0) + 1);
+  }
+  return map;
+});
+
 const filteredTaskItems = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
   if (!query) {
@@ -134,7 +143,9 @@ onMounted(async () => {
           :key="item.issue.idReadable"
           :issue="item.issue"
           :clickable="true"
+          :on-board-count="boardCountByIssueId.get(item.issue.idReadable) ?? 1"
           @click="focusOnTask(item.issue.idReadable)"
+          @navigate-to-board="(id) => focusOnTask(id)"
         />
       </div>
     </div>
