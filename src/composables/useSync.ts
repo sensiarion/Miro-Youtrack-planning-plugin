@@ -1,5 +1,12 @@
 import { ref } from 'vue';
 import { loadSyncState, saveSyncState, saveSettings, type SyncState } from '../storage';
+
+const DEFAULT_SYNC_STATE: SyncState = {
+  lastSyncAt: null,
+  foundIssueCount: 0,
+  updatedOnBoardCount: 0,
+  createdInNotFoundCount: 0,
+};
 import { searchIssues, fetchIssuesLinks } from '../youtrack/client';
 import { YouTrackIssue } from '../youtrack/types';
 import { updateTaskShape, getTaskColor, buildTaskMindmapContent } from '../miro/taskShape';
@@ -13,7 +20,11 @@ type SyncedTaskItem = {
 };
 
 export function useSync() {
-  const syncState = ref<SyncState>(loadSyncState());
+  const syncState = ref<SyncState>({ ...DEFAULT_SYNC_STATE });
+
+  async function initSyncState(): Promise<void> {
+    syncState.value = await loadSyncState();
+  }
   const isSyncing = ref(false);
   const syncError = ref<string | null>(null);
   const syncedTasks = ref<YouTrackIssue[]>([]);
@@ -301,11 +312,11 @@ export function useSync() {
         updatedOnBoardCount: updatedCount,
         createdInNotFoundCount: createdCount,
       };
-      saveSyncState(newSyncState);
+      await saveSyncState(newSyncState);
       syncState.value = newSyncState;
 
-      // Save sync query
-      saveSettings({ syncQuery });
+      // Save sync query to board storage
+      await saveSettings({ syncQuery });
 
       alert(`Sync completed! Found ${issues.length} issues, updated ${updatedCount}, created ${createdCount} new items.`);
     } catch (error: any) {
@@ -442,6 +453,7 @@ export function useSync() {
     syncError,
     syncedTasks,
     syncedTaskItems,
+    initSyncState,
     syncTasks,
     refreshSyncedTasks,
     focusOnTask,

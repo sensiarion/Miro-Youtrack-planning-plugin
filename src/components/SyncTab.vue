@@ -11,6 +11,7 @@ const {
   syncError,
   syncedTasks,
   syncedTaskItems,
+  initSyncState,
   syncTasks: performSync,
   refreshSyncedTasks,
   focusOnTask,
@@ -54,6 +55,7 @@ const filteredTaskItems = computed(() => {
 });
 
 onMounted(async () => {
+  await initSyncState();
   await refreshSyncedTasks();
   if (typeof window !== 'undefined') {
     const handler = () => {

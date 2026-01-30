@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue';
 import { searchIssues } from '../youtrack/client';
 import { YouTrackIssue } from '../youtrack/types';
-import { saveSettings, type Settings } from '../storage';
+import { saveSettings } from '../storage';
 import TaskItem from './TaskItem.vue';
 import { useSettings } from '../composables/useSettings';
 
@@ -49,8 +49,8 @@ async function loadTasks(queryOverride?: string) {
       console.log('First issue assignee:', issues[0].assignee);
     }
     
-    // Save query (even if empty, to remember user preference)
-    saveSettings({ taskQuery: queryToUse });
+    // Save task query to Miro board storage
+    await saveSettings({ taskQuery: queryToUse });
     taskQuery.value = queryToUse;
   } catch (error: any) {
     taskError.value = error.message || 'Failed to load tasks';
@@ -79,7 +79,7 @@ defineExpose<{
         type="text"
         placeholder="Leave empty for all issues (sorted by update date)"
         class="input"
-        @keyup.enter="loadTasks"
+        @keyup.enter="loadTasks()"
       />
       <button 
         class="button button-primary"

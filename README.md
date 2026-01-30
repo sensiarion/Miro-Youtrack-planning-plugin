@@ -45,11 +45,11 @@ A powerful Miro plugin that seamlessly integrates YouTrack issue tracking with M
 - **Live Updates**: Task list automatically refreshes when new cards are added
 
 ### ⚙️ Settings and Configuration
-- **YouTrack Instance URL**: Configure your YouTrack server URL
-- **API Token**: Secure storage of YouTrack permanent token
-- **Status Field Name**: Configurable field name for state tracking (default: "State")
-- **Local Storage**: All settings persist in browser local storage
-- **Cross-tab Sync**: Settings are synchronized across all plugin tabs
+- **YouTrack Instance URL**: Configure your YouTrack server URL (stored per board in Miro)
+- **API Token**: Stored in browser local storage (user-side only, not shared with board)
+- **Status Field Name**: Configurable field name for state tracking (default: "State", stored per board)
+- **Board Storage**: Task query, sync query, instance URL, and status field are stored in Miro board storage so they follow the board and are shared with collaborators
+- **Token**: YouTrack token stays in local storage for security and persists on the user's device
 
 ## Quick Start
 
@@ -142,7 +142,7 @@ src/
 ├── app.ts               # Vue app initialization
 ├── index.ts             # Miro SDK initialization
 ├── constants.ts         # Configuration constants
-├── storage.ts           # LocalStorage persistence layer
+├── storage.ts           # Miro board storage + localStorage (token only)
 ├── components/          # Vue components
 │   ├── SyncTab.vue      # Sync tab with task list and search
 │   ├── TasksTab.vue     # Task search and drag interface

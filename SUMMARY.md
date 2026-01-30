@@ -40,11 +40,10 @@ YouTrack Plan Mindmap is a Miro plugin that enables seamless integration between
 - **State**: Current task state (with localization support)
 
 ### 6. Settings and Configuration
-- **YouTrack Instance URL**: Configure your YouTrack server URL
-- **API Token**: Secure storage of YouTrack permanent token
-- **Status Field Name**: Configurable field name for state tracking (default: "State")
-- **Local Storage**: All settings persist in browser local storage
-- **Cross-tab Sync**: Settings are synchronized across all plugin tabs
+- **YouTrack Instance URL**: Configure your YouTrack server URL (stored per board in Miro)
+- **API Token**: Stored in browser local storage (user-side only)
+- **Status Field Name**: Configurable field name for state tracking (default: "State", stored per board)
+- **Board Storage**: Task/sync queries, instance URL, status field in Miro board storage; token in local storage
 
 ## Technical Architecture
 
@@ -61,7 +60,7 @@ src/
 ├── app.ts               # Vue app initialization
 ├── index.ts             # Miro SDK initialization (headless iframe)
 ├── constants.ts         # Configuration constants (colors, dimensions, etc.)
-├── storage.ts           # LocalStorage persistence layer
+├── storage.ts           # Miro board storage + localStorage (token only)
 ├── youtrack/
 │   ├── types.ts         # TypeScript interfaces for YouTrack data
 │   ├── client.ts         # YouTrack REST API client
@@ -100,7 +99,7 @@ src/
    - User clicks "Sync Now" → Fetch issues from YouTrack → Get all mindmap nodes from board → Match by issue URL → Update existing nodes → Create missing nodes in "Not found" frame → Update sync statistics
 
 3. **Settings Flow**:
-   - User configures YouTrack URL and token → Save to localStorage → Auto-trigger default search → Display results
+   - User configures YouTrack URL and token → Board settings to Miro storage, token to localStorage → Auto-trigger default search → Display results
 
 ## API Integration
 
@@ -130,8 +129,8 @@ src/
 - Frame titles
 
 ### Storage (`src/storage.ts`)
-- Settings: YouTrack URL, token, queries, status field name
-- Sync State: Last sync time, statistics
+- **Miro board storage** (collection `youtrack-sync`): YouTrack URL, task query, sync query, status field name, sync state (last sync time, statistics). Shared with board collaborators.
+- **localStorage** (user-side only): YouTrack API token. Persists on the user's device, not stored on the board.
 
 ## Usage Example
 
@@ -195,4 +194,4 @@ npm run build
 - Mindmap nodes use experimental Miro API - subject to change
 - Requires YouTrack instance with REST API enabled
 - CORS must be configured on YouTrack instance for browser requests
-- Local storage is used for persistence (not synced across devices)
+- Board settings (URL, queries, status field, sync state) are stored in Miro board storage and follow the board; only the YouTrack token is stored in local storage (user-side)

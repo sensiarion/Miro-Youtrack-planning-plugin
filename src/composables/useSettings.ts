@@ -1,49 +1,62 @@
 import { ref, computed } from 'vue';
 import { loadSettings, saveSettings, type Settings } from '../storage';
 
+const DEFAULT_SETTINGS: Settings = {
+  youtrackBaseUrl: '',
+  youtrackToken: '',
+  taskQuery: '',
+  syncQuery: '',
+  statusFieldName: 'State',
+};
+
+// Shared state so all components see the same settings (singleton)
+const settings = ref<Settings>({ ...DEFAULT_SETTINGS });
+const youtrackBaseUrl = ref('');
+const youtrackToken = ref('');
+const statusFieldName = ref(DEFAULT_SETTINGS.statusFieldName);
+
+const hasValidSettings = computed(() => {
+  if (settings.value.youtrackBaseUrl && settings.value.youtrackToken) {
+    return true;
+  }
+  return !!(youtrackBaseUrl.value && youtrackToken.value);
+});
+
+async function initSettings(): Promise<void> {
+  const loaded = await loadSettings();
+  settings.value = loaded;
+  youtrackBaseUrl.value = loaded.youtrackBaseUrl;
+  youtrackToken.value = loaded.youtrackToken;
+  statusFieldName.value = loaded.statusFieldName;
+}
+
+async function saveSettingsData(): Promise<Partial<Settings>> {
+  const newSettings: Partial<Settings> = {
+    youtrackBaseUrl: youtrackBaseUrl.value,
+    youtrackToken: youtrackToken.value,
+    statusFieldName: statusFieldName.value,
+  };
+  await saveSettings(newSettings);
+  settings.value = { ...settings.value, ...newSettings };
+  return newSettings;
+}
+
+function getEffectiveSettings() {
+  return {
+    baseUrl: settings.value.youtrackBaseUrl || youtrackBaseUrl.value,
+    token: settings.value.youtrackToken || youtrackToken.value,
+    statusFieldName: settings.value.statusFieldName || statusFieldName.value,
+  };
+}
+
 export function useSettings() {
-  const settings = ref<Settings>(loadSettings());
-  
-  // Settings form state
-  const youtrackBaseUrl = ref(settings.value.youtrackBaseUrl);
-  const youtrackToken = ref(settings.value.youtrackToken);
-  const statusFieldName = ref(settings.value.statusFieldName);
-
-  // Computed - check both refs (for real-time validation) and saved settings (for cross-tab sync)
-  const hasValidSettings = computed(() => {
-    // Check if settings are saved and valid
-    if (settings.value.youtrackBaseUrl && settings.value.youtrackToken) {
-      return true;
-    }
-    // Also check current form values (for when user is typing but hasn't saved yet)
-    return !!(youtrackBaseUrl.value && youtrackToken.value);
-  });
-
-  async function saveSettingsData() {
-    const newSettings: Partial<Settings> = {
-      youtrackBaseUrl: youtrackBaseUrl.value,
-      youtrackToken: youtrackToken.value,
-      statusFieldName: statusFieldName.value,
-    };
-    saveSettings(newSettings);
-    settings.value = { ...settings.value, ...newSettings };
-    return newSettings;
-  }
-
-  function getEffectiveSettings() {
-    return {
-      baseUrl: settings.value.youtrackBaseUrl || youtrackBaseUrl.value,
-      token: settings.value.youtrackToken || youtrackToken.value,
-      statusFieldName: settings.value.statusFieldName || statusFieldName.value,
-    };
-  }
-
   return {
     settings,
     youtrackBaseUrl,
     youtrackToken,
     statusFieldName,
     hasValidSettings,
+    initSettings,
     saveSettingsData,
     getEffectiveSettings,
   };
