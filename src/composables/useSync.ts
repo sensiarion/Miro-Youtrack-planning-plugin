@@ -1,5 +1,34 @@
 import { ref } from 'vue';
-import { loadSyncState, saveSyncState, saveSettings, type SyncState } from '../storage';
+import {
+  loadSyncState,
+  loadSettings,
+  saveSyncState,
+  saveSettings,
+  type SyncState,
+} from '../storage';
+import { searchIssues, fetchIssuesLinks } from '../youtrack/client';
+import { YouTrackIssue } from '../youtrack/types';
+import {
+  updateTaskShape,
+  getTaskColor,
+  buildTaskMindmapContent,
+  getDefaultColorForState,
+} from '../miro/taskShape';
+import {
+  getOrCreateNotFoundFrame,
+  expandFrameIfNeeded,
+  DEFAULT_FRAME_WIDTH,
+  DEFAULT_FRAME_HEIGHT,
+} from '../miro/notFoundFrame';
+import {
+  METADATA_KEY,
+  TASK_FILL_OPACITY,
+  TASK_SHAPE_WIDTH,
+  TASK_SHAPE_HEIGHT,
+  DEFAULT_STATE_COLORS,
+} from '../constants';
+import { createIssueConnector, getPluginConnectors, removeConnector } from '../miro/connectors';
+import { useSettings } from './useSettings';
 
 const DEFAULT_SYNC_STATE: SyncState = {
   lastSyncAt: null,
@@ -7,12 +36,6 @@ const DEFAULT_SYNC_STATE: SyncState = {
   updatedOnBoardCount: 0,
   createdInNotFoundCount: 0,
 };
-import { searchIssues, fetchIssuesLinks } from '../youtrack/client';
-import { YouTrackIssue } from '../youtrack/types';
-import { updateTaskShape, getTaskColor, buildTaskMindmapContent } from '../miro/taskShape';
-import { getOrCreateNotFoundFrame, expandFrameIfNeeded, DEFAULT_FRAME_WIDTH, DEFAULT_FRAME_HEIGHT } from '../miro/notFoundFrame';
-import { METADATA_KEY, TASK_FILL_OPACITY, TASK_SHAPE_WIDTH, TASK_SHAPE_HEIGHT } from '../constants';
-import { createIssueConnector, getPluginConnectors, removeConnector } from '../miro/connectors';
 
 type SyncedTaskItem = {
   issue: YouTrackIssue;
@@ -20,6 +43,7 @@ type SyncedTaskItem = {
 };
 
 export function useSync() {
+  const { updateStateColors } = useSettings();
   const syncState = ref<SyncState>({ ...DEFAULT_SYNC_STATE });
 
   async function initSyncState(): Promise<void> {
@@ -78,14 +102,14 @@ export function useSync() {
     };
   }
 
-  function collectMatchingTaskShapes(
+  async function collectMatchingTaskShapes(
     items: any[],
     issuesById?: Map<string, YouTrackIssue>
-  ): {
+  ): Promise<{
     taskShapes: Array<{ shape: any; issueId: string; issue: YouTrackIssue }>;
     syncedTasksList: YouTrackIssue[];
     syncedTaskItems: SyncedTaskItem[];
-  } {
+  }> {
     const taskShapes: Array<{ shape: any; issueId: string; issue: YouTrackIssue }> = [];
     const syncedTasksList: YouTrackIssue[] = [];
     const syncedTaskItems: SyncedTaskItem[] = [];
@@ -97,7 +121,23 @@ export function useSync() {
         continue;
       }
 
-      const issue = issuesById?.get(issueId) ?? buildIssueFromContent(content, issueId);
+      let issue = issuesById?.get(issueId) ?? buildIssueFromContent(content, issueId);
+      if (issue && !issue.stateName && issue.stateNameLocalized == null) {
+        try {
+          if (typeof item?.getMetadata === 'function') {
+            const metadata = await item.getMetadata(METADATA_KEY);
+            if (metadata && typeof metadata === 'object') {
+              issue = {
+                ...issue,
+                stateName: metadata.stateName ?? '',
+                stateNameLocalized: metadata.stateNameLocalized ?? null,
+              };
+            }
+          }
+        } catch (error) {
+          console.warn('Failed to read task metadata for state colors:', error);
+        }
+      }
       if (!issue || !item?.id) {
         continue;
       }
@@ -116,7 +156,8 @@ export function useSync() {
       const allShapes = await miro.board.get({ type: 'shape' });
       const allItems = [...allMindmapNodes, ...allShapes];
 
-      const { syncedTasksList, syncedTaskItems: boardTaskItems } = collectMatchingTaskShapes(allItems);
+      const { syncedTasksList, syncedTaskItems: boardTaskItems } =
+        await collectMatchingTaskShapes(allItems);
       syncedTasks.value = syncedTasksList;
       syncedTaskItems.value = boardTaskItems;
     } catch (error) {
@@ -162,7 +203,7 @@ export function useSync() {
 
   async function syncTasks(
     syncQuery: string,
-    getEffectiveSettings: () => { baseUrl: string; token: string; statusFieldName: string }
+    getEffectiveSettings: () => { baseUrl: string; token: string; statusFieldName: string; stateColors: Record<string, string> }
   ) {
     if (!syncQuery.trim()) {
       syncError.value = 'Please enter a sync query';
@@ -173,14 +214,46 @@ export function useSync() {
     syncError.value = null;
 
     try {
-      const { baseUrl, token, statusFieldName } = getEffectiveSettings();
-      
+      const effective = getEffectiveSettings();
+      const freshSettings = await loadSettings();
+      const storedStateColors =
+        freshSettings.stateColors && typeof freshSettings.stateColors === 'object'
+          ? freshSettings.stateColors
+          : {};
+      const effectiveStateColors =
+        effective.stateColors && typeof effective.stateColors === 'object'
+          ? effective.stateColors
+          : {};
+      const stateColors: Record<string, string> = {
+        ...storedStateColors,
+        ...effectiveStateColors,
+      };
+
+      const { baseUrl, token, statusFieldName } = effective;
       const issues = await searchIssues({
         baseUrl,
         token,
         query: syncQuery,
         statusFieldName,
       });
+
+      for (const issue of issues) {
+        const displayName = issue.stateNameLocalized || issue.stateName;
+        if (!displayName || displayName in stateColors) continue;
+        const existingColor = issue.stateName ? stateColors[issue.stateName] : undefined;
+        stateColors[displayName] =
+          existingColor ??
+          (issue.stateName && issue.stateName in DEFAULT_STATE_COLORS
+            ? DEFAULT_STATE_COLORS[issue.stateName]
+            : getDefaultColorForState(displayName));
+      }
+
+      const toSave = { ...storedStateColors, ...effectiveStateColors };
+      for (const [name, color] of Object.entries(stateColors)) {
+        if (!(name in toSave)) toSave[name] = color;
+      }
+      await saveSettings({ stateColors: toSave });
+      updateStateColors(toSave);
 
       // Build map by issue ID (idReadable)
       const issuesById = new Map<string, YouTrackIssue>();
@@ -195,7 +268,7 @@ export function useSync() {
       
       // Identify matching task shapes by href task id only
       const { taskShapes: initialTaskShapes, syncedTasksList, syncedTaskItems: initialTaskItems } =
-        collectMatchingTaskShapes(allItems, issuesById);
+        await collectMatchingTaskShapes(allItems, issuesById);
       const taskShapes = [...initialTaskShapes];
       
       // Update synced tasks list
@@ -208,7 +281,7 @@ export function useSync() {
       // Update existing task shapes
       const remainingIssuesById = new Map(issuesById);
       for (const { shape, issueId, issue } of taskShapes) {
-        await updateTaskShape(shape, issue);
+        await updateTaskShape(shape, issue, stateColors);
         updatedCount++;
         remainingIssuesById.delete(issueId);
       }
@@ -265,7 +338,8 @@ export function useSync() {
         
         let index = 0;
         for (const issue of remainingIssuesById.values()) {
-          const color = getTaskColor(issue.stateName);
+          const stateKey = issue.stateNameLocalized || issue.stateName;
+          const color = getTaskColor(stateKey, stateColors, issue.stateName);
           const content = buildTaskMindmapContent(issue);
           
           // Calculate grid position

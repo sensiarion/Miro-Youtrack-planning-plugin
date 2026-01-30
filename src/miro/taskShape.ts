@@ -1,22 +1,56 @@
-import { TASK_COLORS, TASK_FILL_OPACITY, METADATA_KEY, TASK_SHAPE_WIDTH, TASK_SHAPE_HEIGHT } from '../constants';
+import {
+  TASK_COLORS,
+  DEFAULT_STATE_COLORS,
+  TASK_FILL_OPACITY,
+  METADATA_KEY,
+  TASK_SHAPE_WIDTH,
+  TASK_SHAPE_HEIGHT,
+} from '../constants';
 import { YouTrackIssue } from '../youtrack/types';
 
 /**
- * Get color for task state
+ * Default color for a state name (used when no user setting exists).
+ * Planning/Todo/Backlog → yellow; In work/In progress/To verify → green; Done/Resolved/Completed → purple; unknown → planning.
  */
-export function getTaskColor(stateName: string): string {
+export function getDefaultColorForState(stateName: string): string {
   const upperState = stateName.toUpperCase();
   if (upperState.includes('PLANNING') || upperState.includes('TODO') || upperState.includes('BACKLOG')) {
     return TASK_COLORS.PLANNING;
   }
-  if (upperState.includes('IN WORK') || upperState.includes('IN_PROGRESS') || upperState.includes('ON DESK')) {
+  if (
+    upperState.includes('IN WORK') ||
+    upperState.includes('IN_PROGRESS') ||
+    upperState.includes('IN PROGRESS') ||
+    upperState.includes('TO VERIFY') ||
+    upperState.includes('ON DESK')
+  ) {
     return TASK_COLORS.IN_WORK;
   }
   if (upperState.includes('DONE') || upperState.includes('RESOLVED') || upperState.includes('COMPLETED')) {
     return TASK_COLORS.DONE;
   }
-  // Default to planning color if unknown
   return TASK_COLORS.PLANNING;
+}
+
+/**
+ * Get color for task state. Uses user stateColors if present; else DEFAULT_STATE_COLORS by internal name; else substring-based default.
+ * Tries displayKey first, then fallbackKey (internal stateName), so colors resolve whether we keyed by display or internal name.
+ */
+export function getTaskColor(
+  displayKey: string,
+  stateColors?: Record<string, string>,
+  fallbackKey?: string
+): string {
+  if (stateColors) {
+    if (displayKey && displayKey in stateColors) return stateColors[displayKey];
+    if (fallbackKey && fallbackKey in stateColors) return stateColors[fallbackKey];
+  }
+  // Defaults: first by original (non-localized) name from constants, then substring heuristic
+  const internalName = fallbackKey || displayKey || '';
+  if (internalName && internalName in DEFAULT_STATE_COLORS) {
+    return DEFAULT_STATE_COLORS[internalName];
+  }
+  return getDefaultColorForState(internalName || displayKey || '');
 }
 
 /**
@@ -74,8 +108,14 @@ export function extractIssueUrlFromShape(content: string): string | null {
 /**
  * Create a task mindmap node on the board at specified coordinates
  */
-export async function createTaskShapeAt(issue: YouTrackIssue, x: number, y: number): Promise<void> {
-  const color = getTaskColor(issue.stateName);
+export async function createTaskShapeAt(
+  issue: YouTrackIssue,
+  x: number,
+  y: number,
+  stateColors?: Record<string, string>
+): Promise<void> {
+  const stateKey = issue.stateNameLocalized || issue.stateName;
+  const color = getTaskColor(stateKey, stateColors, issue.stateName);
   const content = buildTaskMindmapContent(issue);
   
   // Create mindmap node with shape type
@@ -116,8 +156,13 @@ export async function createTaskShapeAt(issue: YouTrackIssue, x: number, y: numb
 /**
  * Update an existing task mindmap node with new issue data
  */
-export async function updateTaskShape(node: any, issue: YouTrackIssue): Promise<void> {
-  const color = getTaskColor(issue.stateName);
+export async function updateTaskShape(
+  node: any,
+  issue: YouTrackIssue,
+  stateColors?: Record<string, string>
+): Promise<void> {
+  const stateKey = issue.stateNameLocalized || issue.stateName;
+  const color = getTaskColor(stateKey, stateColors, issue.stateName);
   const content = buildTaskMindmapContent(issue);
   
   // Check if node is a child of another item (part of mindmap structure)

@@ -6,6 +6,8 @@ export interface Settings {
   taskQuery: string;
   syncQuery: string;
   statusFieldName: string;
+  /** State name → hex color (board-specific; populated by sync, editable in Settings) */
+  stateColors: Record<string, string>;
 }
 
 export interface SyncState {
@@ -21,6 +23,7 @@ const DEFAULT_SETTINGS: Settings = {
   taskQuery: '',
   syncQuery: '',
   statusFieldName: 'State',
+  stateColors: {},
 };
 
 const DEFAULT_SYNC_STATE: SyncState = {
@@ -35,6 +38,7 @@ const BOARD_KEYS = {
   taskQuery: 'taskQuery',
   syncQuery: 'syncQuery',
   statusFieldName: 'statusFieldName',
+  stateColors: 'stateColors',
   syncState: 'syncState',
 } as const;
 
@@ -48,11 +52,12 @@ function getBoardCollection() {
 export async function loadSettings(): Promise<Settings> {
   try {
     const coll = getBoardCollection();
-    const [baseUrl, taskQuery, syncQuery, statusFieldName] = await Promise.all([
+    const [baseUrl, taskQuery, syncQuery, statusFieldName, stateColors] = await Promise.all([
       coll.get<string>(BOARD_KEYS.youtrackBaseUrl),
       coll.get<string>(BOARD_KEYS.taskQuery),
       coll.get<string>(BOARD_KEYS.syncQuery),
       coll.get<string>(BOARD_KEYS.statusFieldName),
+      coll.get<Record<string, string>>(BOARD_KEYS.stateColors),
     ]);
     const token = localStorage.getItem(STORAGE_KEYS.TOKEN) ?? '';
     return {
@@ -62,12 +67,14 @@ export async function loadSettings(): Promise<Settings> {
       taskQuery: taskQuery ?? DEFAULT_SETTINGS.taskQuery,
       syncQuery: syncQuery ?? DEFAULT_SETTINGS.syncQuery,
       statusFieldName: statusFieldName ?? DEFAULT_SETTINGS.statusFieldName,
+      stateColors: stateColors ?? DEFAULT_SETTINGS.stateColors,
     };
   } catch (e) {
     console.error('Failed to load settings:', e);
     return {
       ...DEFAULT_SETTINGS,
       youtrackToken: localStorage.getItem(STORAGE_KEYS.TOKEN) ?? '',
+      stateColors: {},
     };
   }
 }
@@ -93,6 +100,9 @@ export async function saveSettings(settings: Partial<Settings>): Promise<void> {
     }
     if (settings.statusFieldName !== undefined) {
       boardUpdates.push(coll.set(BOARD_KEYS.statusFieldName, settings.statusFieldName));
+    }
+    if (settings.stateColors !== undefined) {
+      boardUpdates.push(coll.set(BOARD_KEYS.stateColors, settings.stateColors));
     }
     await Promise.all(boardUpdates);
   } catch (e) {

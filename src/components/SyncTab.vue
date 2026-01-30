@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useSettings } from '../composables/useSettings';
 import { useSync } from '../composables/useSync';
 import TaskItem from './TaskItem.vue';
@@ -19,6 +19,20 @@ const {
 
 const syncQuery = ref(settings.value.syncQuery || '');
 const searchQuery = ref('');
+
+// Sync from loaded settings once (settings load async in App.vue onMounted, so initial syncQuery can be stale)
+let syncQueryFilledFromSettings = false;
+watch(
+  () => settings.value.syncQuery,
+  (newVal) => {
+    if (syncQueryFilledFromSettings) return;
+    if (newVal != null && newVal !== '') {
+      syncQuery.value = newVal;
+      syncQueryFilledFromSettings = true;
+    }
+  },
+  { immediate: true }
+);
 
 async function handleSync() {
   if (!hasValidSettings.value) {

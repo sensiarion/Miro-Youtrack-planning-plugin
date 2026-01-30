@@ -5,6 +5,7 @@ import { YouTrackIssue } from '../youtrack/types';
 export function useDropHandler() {
   const isCreatingTask = ref(false);
   let dropHandlerRef: ((event: { x: number; y: number; target: HTMLElement }) => Promise<void>) | null = null;
+  let lastDrop: { issueId: string; x: number; y: number; at: number } | null = null;
 
   async function handleDrop(event: { x: number; y: number; target: HTMLElement }) {
     // Prevent duplicate drops
@@ -36,6 +37,22 @@ export function useDropHandler() {
       }
 
       const issue: YouTrackIssue = JSON.parse(issueData);
+      if (!Number.isFinite(event.x) || !Number.isFinite(event.y)) {
+        console.warn('Drop event has invalid coordinates, skipping', event);
+        return;
+      }
+      const now = Date.now();
+      if (lastDrop) {
+        const isSameIssue = lastDrop.issueId === issue.idReadable;
+        const isNearby =
+          Math.abs(lastDrop.x - event.x) < 2 && Math.abs(lastDrop.y - event.y) < 2;
+        const isRecent = now - lastDrop.at < 1000;
+        if (isSameIssue && isNearby && isRecent) {
+          console.log('Skipping duplicate drop event for', issue.idReadable);
+          return;
+        }
+      }
+      lastDrop = { issueId: issue.idReadable, x: event.x, y: event.y, at: now };
       console.log('Creating task node for issue:', issue.idReadable, 'assignee:', issue.assignee);
       await createTaskShapeAt(issue, event.x, event.y);
       if (typeof window !== 'undefined') {

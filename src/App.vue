@@ -38,7 +38,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div id="root">
+  <div id="root" @dragover.prevent @drop.prevent>
     <div class="app-container">
       <TabNavigation v-model:activeTab="activeTab" />
 
