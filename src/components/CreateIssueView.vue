@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
 import { useSettings } from '../composables/useSettings';
 import { useCreateIssue } from '../composables/useCreateIssue';
+import { useToast } from '../composables/useToast';
 import TypeAhead from './TypeAhead.vue';
 import type { YouTrackUser } from '../youtrack/client';
 import type { YouTrackIssue } from '../youtrack/types';
 
-const { initSettings, hasValidSettings } = useSettings();
+const { hasValidSettings } = useSettings();
 
 const {
   projects,
@@ -18,16 +18,19 @@ const {
   selectedAssigneeLogin,
   parentIssueId,
   linkedIssueIds,
+  transformShapeId,
   isSubmitting,
   submitError,
   canSubmit,
-  open: openCreate,
+  close,
   searchAssignees,
   searchIssuesByQuery,
   resolveUserByLogin,
   resolveIssueByKey,
   submit,
 } = useCreateIssue();
+
+const { show: showToast } = useToast();
 
 function userKey(u: YouTrackUser) { return u.login; }
 function userLabel(u: YouTrackUser) { return u.fullName || u.login; }
@@ -47,52 +50,28 @@ function setLinked(value: string | string[]) {
   linkedIssueIds.value = Array.isArray(value) ? [...value] : value ? [value] : [];
 }
 
-async function closeModal(result?: { idReadable: string }) {
-  try {
-    await miro.board.ui.closeModal(result as any);
-  } catch (e) {
-    console.warn('closeModal failed:', e);
-  }
-}
-
 async function handleSubmit() {
   const id = await submit();
   if (id) {
-    await closeModal({ idReadable: id });
+    showToast('success', `Issue ${id} created and added to board`, 5000);
+    close();
   }
 }
-
-async function handleCancel() {
-  await closeModal();
-}
-
-onMounted(async () => {
-  await initSettings();
-  const params = new URLSearchParams(window.location.search);
-  const prefillSummary = params.get('summary') ?? undefined;
-  const prefillParent = params.get('parent') ?? undefined;
-  const prefillLinkedRaw = params.get('linked');
-  const prefillLinked = prefillLinkedRaw
-    ? prefillLinkedRaw.split(',').map(s => s.trim()).filter(Boolean)
-    : undefined;
-  const transform = params.get('transform') ?? undefined;
-  await openCreate({
-    summary: prefillSummary,
-    parentIssueId: prefillParent,
-    linkedIssueIds: prefillLinked,
-    transformShapeId: transform,
-  });
-});
 </script>
 
 <template>
-  <div class="page">
-    <header class="page-header">
+  <div class="view">
+    <header class="view-header">
+      <button type="button" class="back" :disabled="isSubmitting" @click="close" aria-label="Back">‹ Back</button>
       <h2>Create YouTrack issue</h2>
     </header>
 
     <div v-if="!hasValidSettings" class="warning">
-      YouTrack URL or token missing — open the plugin panel and configure Settings first, then reopen this dialog.
+      YouTrack URL or token missing — open Settings, fill them in, then try again.
+    </div>
+
+    <div v-if="transformShapeId" class="info-banner">
+      Selected shape on the board will become the new task card.
     </div>
 
     <div v-if="projectsError" class="error">{{ projectsError }}</div>
@@ -113,10 +92,10 @@ onMounted(async () => {
 
       <div class="form-group form-group-full">
         <label for="ci-description">Description:</label>
-        <textarea id="ci-description" v-model="description" class="input textarea" rows="6" placeholder="Markdown supported"></textarea>
+        <textarea id="ci-description" v-model="description" class="input textarea" rows="5" placeholder="Markdown supported"></textarea>
       </div>
 
-      <div class="form-group">
+      <div class="form-group form-group-full">
         <label for="ci-assignee">Assignee:</label>
         <TypeAhead
           input-id="ci-assignee"
@@ -131,7 +110,7 @@ onMounted(async () => {
         />
       </div>
 
-      <div class="form-group">
+      <div class="form-group form-group-full">
         <label for="ci-parent">Parent issue (subtask of):</label>
         <TypeAhead
           input-id="ci-parent"
@@ -165,8 +144,8 @@ onMounted(async () => {
 
     <div v-if="submitError" class="error">{{ submitError }}</div>
 
-    <footer class="page-footer">
-      <button class="button button-ghost" type="button" :disabled="isSubmitting" @click="handleCancel">Cancel</button>
+    <footer class="view-footer">
+      <button class="button button-ghost" type="button" :disabled="isSubmitting" @click="close">Cancel</button>
       <button class="button button-primary" type="button" :disabled="!canSubmit" @click="handleSubmit">
         <span v-if="isSubmitting">Creating…</span>
         <span v-else>Create issue</span>
@@ -176,24 +155,47 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.page {
-  padding: 20px;
-  max-width: 720px;
-  margin: 0 auto;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+.view {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+}
+
+.view-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.view-header h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
   color: var(--gray-900, #111827);
 }
 
-.page-header h2 {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0 0 16px;
+.back {
+  background: transparent;
+  border: 1px solid var(--gray-300, #d1d5db);
+  color: var(--gray-700, #374151);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.back:hover:not(:disabled) {
+  background: var(--gray-100, #f3f4f6);
 }
 
 .form-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .form-group {
@@ -201,14 +203,14 @@ onMounted(async () => {
 }
 
 .form-group-full {
-  grid-column: 1 / -1;
+  width: 100%;
 }
 
 .form-group label {
   display: block;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   font-weight: 500;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--gray-700, #374151);
 }
 
@@ -233,28 +235,36 @@ onMounted(async () => {
 
 .textarea { resize: vertical; }
 
+.error,
+.warning,
+.info-banner {
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  border: 1px solid;
+}
+
 .error {
-  padding: 10px;
   background: var(--red-50, #fef2f2);
   color: var(--red-700, #b91c1c);
-  border-radius: 6px;
-  margin: 12px 0;
-  font-size: 13px;
-  border: 1px solid var(--red-200, #fecaca);
+  border-color: var(--red-200, #fecaca);
 }
 
 .warning {
-  padding: 10px;
   background: var(--yellow-50, #fffbeb);
   color: var(--yellow-800, #92400e);
-  border-radius: 6px;
-  margin: 12px 0;
-  font-size: 13px;
-  border: 1px solid var(--yellow-200, #fde68a);
+  border-color: var(--yellow-200, #fde68a);
 }
 
-.page-footer {
-  margin-top: 20px;
+.info-banner {
+  background: #f0f9ff;
+  color: #0c4a6e;
+  border-color: #bae6fd;
+}
+
+.view-footer {
+  margin-top: 16px;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
@@ -273,8 +283,4 @@ onMounted(async () => {
 .button-primary:disabled { background: var(--gray-300, #d1d5db); color: var(--gray-500, #6b7280); cursor: not-allowed; }
 .button-ghost { background: transparent; color: var(--gray-700, #374151); border: 1px solid var(--gray-300, #d1d5db); }
 .button-ghost:hover:not(:disabled) { background: var(--gray-100, #f3f4f6); }
-
-@media (max-width: 600px) {
-  .form-grid { grid-template-columns: 1fr; }
-}
 </style>

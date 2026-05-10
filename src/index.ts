@@ -1,12 +1,14 @@
 const CREATE_ISSUE_ACTION = 'youtrack-create-from-shape';
+const PENDING_CREATE_KEY = 'youtrack-plan-mindmap:pendingCreate';
 
 export async function init() {
   miro.board.ui.on('icon:click', async () => {
     await miro.board.ui.openPanel({ url: 'app.html' });
   });
 
-  // Register a board context-menu / right-click action that turns the selected shape
-  // into a YouTrack issue. Uses experimental.action API; if unavailable, fail silently.
+  // Right-click action that turns the selected shape into a YouTrack issue.
+  // Opens the plugin panel and signals the create view via a localStorage handoff
+  // (same-origin, picked up by App.vue onMounted).
   try {
     const action = (miro.board as any).experimental?.action;
     if (action && typeof action.create === 'function') {
@@ -30,16 +32,17 @@ export async function init() {
       if (!items.length) return;
       const item = items[0];
       const text = extractShapeText(item);
-      const params = new URLSearchParams();
-      if (text) params.set('summary', text);
-      if (item?.id) params.set('transform', item.id);
-      const qs = params.toString();
-      await miro.board.ui.openModal({
-        url: `/create-issue.html${qs ? '?' + qs : ''}`,
-        fullscreen: false,
-      } as any);
+      const payload: { summary?: string; transform?: string } = {};
+      if (text) payload.summary = text;
+      if (item?.id) payload.transform = item.id;
+      try {
+        localStorage.setItem(PENDING_CREATE_KEY, JSON.stringify(payload));
+      } catch (storageErr) {
+        console.warn('Could not store pending create payload:', storageErr);
+      }
+      await miro.board.ui.openPanel({ url: 'app.html' });
     } catch (e) {
-      console.error('Failed to open create modal from custom action:', e);
+      console.error('Failed to open create panel from custom action:', e);
     }
   });
 }

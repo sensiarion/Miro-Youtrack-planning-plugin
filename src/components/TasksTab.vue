@@ -5,6 +5,7 @@ import { YouTrackIssue } from '../youtrack/types';
 import TaskItem from './TaskItem.vue';
 import { useSettings } from '../composables/useSettings';
 import { useSync } from '../composables/useSync';
+import { useCreateIssue } from '../composables/useCreateIssue';
 import { useToast } from '../composables/useToast';
 import { METADATA_KEY } from '../constants';
 
@@ -18,6 +19,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const { hasValidSettings, settings, applySettings } = useSettings();
 const { syncedTaskItems, refreshSyncedTasks, focusOnTask } = useSync();
+const { open: openCreateView } = useCreateIssue();
 const { show: showToast } = useToast();
 
 const selectedNodeIssueId = ref<string | null>(null);
@@ -89,29 +91,8 @@ async function refreshSelection(): Promise<void> {
   selectedNonPluginShapeId.value = ctx.nonPluginShapeId;
 }
 
-async function openCanvasCreateModal(opts: { summary?: string; parent?: string; linked?: string[]; transformShapeId?: string } = {}): Promise<void> {
-  const params = new URLSearchParams();
-  if (opts.summary) params.set('summary', opts.summary);
-  if (opts.parent) params.set('parent', opts.parent);
-  if (opts.linked && opts.linked.length > 0) params.set('linked', opts.linked.join(','));
-  if (opts.transformShapeId) params.set('transform', opts.transformShapeId);
-  const qs = params.toString();
-  const url = `/create-issue.html${qs ? '?' + qs : ''}`;
-  try {
-    const result = await (miro.board.ui.openModal as any)({ url, fullscreen: false });
-    if (result && typeof result === 'object' && typeof (result as any).idReadable === 'string') {
-      const id = (result as any).idReadable as string;
-      showToast('success', `Issue ${id} created and added to board`, 5000);
-      await refreshSyncedTasks();
-    }
-  } catch (e) {
-    console.error('Failed to open create-issue modal on canvas:', e);
-    showToast('error', 'Could not open create dialog. Make sure the plugin manifest allows /create-issue.html.', 4000);
-  }
-}
-
 function handleCreateIssue() {
-  void openCanvasCreateModal({
+  void openCreateView({
     summary: selectedNonPluginText.value || undefined,
     transformShapeId: selectedNonPluginShapeId.value || undefined,
   });
@@ -119,8 +100,8 @@ function handleCreateIssue() {
 
 function handleCreateSubtask() {
   if (!selectedNodeIssueId.value) return;
-  void openCanvasCreateModal({
-    parent: selectedNodeIssueId.value,
+  void openCreateView({
+    parentIssueId: selectedNodeIssueId.value,
     summary: selectedNonPluginText.value || undefined,
     transformShapeId: selectedNonPluginShapeId.value || undefined,
   });
@@ -137,6 +118,11 @@ const lastSearchInfo = ref<string>('');
 if (settings.value.taskQuery !== undefined && settings.value.taskQuery !== taskQuery.value) {
   taskQuery.value = settings.value.taskQuery;
 }
+
+const truncatedSelectionText = computed(() => {
+  const text = selectedNonPluginText.value || '';
+  return text.length > 60 ? text.slice(0, 57) + '…' : text;
+});
 
 const boardCountByIssueId = computed(() => {
   const map = new Map<string, number>();
@@ -224,27 +210,32 @@ defineExpose<{
     <h2>Search YouTrack Tasks</h2>
     <div class="create-actions">
       <button
-        class="button button-primary"
+        class="button button-primary create-from-selection"
+        v-if="selectedNonPluginText"
         :disabled="!hasValidSettings"
-        :title="selectedNonPluginText ? 'Create issue using selected shape’s text as summary; the shape itself becomes the task card.' : 'Create a new YouTrack issue and place a card on the board.'"
+        :title="`Selected shape becomes the new task card. Summary will be: '${selectedNonPluginText}'`"
         @click="handleCreateIssue"
       >
-        <span v-if="selectedNonPluginText">+ Turn selection into task</span>
-        <span v-else>+ Create issue</span>
+        <span class="prefix">+ Issue from selection:</span>
+        <span class="preview">'{{ truncatedSelectionText }}'</span>
       </button>
+      <button
+        v-else
+        class="button button-primary"
+        :disabled="!hasValidSettings"
+        title="Create a new YouTrack issue and place a card on the board."
+        @click="handleCreateIssue"
+      >+ New issue</button>
       <button
         v-if="selectedNodeIssueId"
         class="button button-ghost"
         :disabled="!hasValidSettings"
+        :title="selectedNonPluginText ? `Subtask of ${selectedNodeIssueId} from selection text` : `Subtask of ${selectedNodeIssueId}`"
         @click="handleCreateSubtask"
       >+ Subtask of {{ selectedNodeIssueId }}</button>
     </div>
-    <div v-if="selectedNonPluginText" class="selection-hint">
-      Will turn the selected shape into a task card. Summary prefilled from its text:
-      <em>{{ selectedNonPluginText }}</em>
-    </div>
-    <div v-else class="selection-hint selection-hint-muted">
-      Tip: select any shape with text on the board, then click <strong>Turn selection into task</strong> to convert it into a YouTrack issue (or right-click → <em>Create YouTrack issue</em>).
+    <div v-if="!selectedNonPluginText && !selectedNodeIssueId" class="selection-hint selection-hint-muted">
+      Tip: select a shape with text on the board to convert it into a task in one click. Right-click a shape and choose <em>Create YouTrack issue from this</em> to do the same from the canvas.
     </div>
     <div class="form-group">
 
@@ -400,6 +391,36 @@ h2 {
   gap: 8px;
   margin-bottom: 12px;
   flex-wrap: wrap;
+}
+
+.create-from-selection {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 8px 14px;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+  animation: pulse-glow 1.4s ease-out 1;
+}
+
+.create-from-selection .prefix {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.create-from-selection .preview {
+  font-weight: 400;
+  font-style: italic;
+  opacity: 0.9;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes pulse-glow {
+  0% { box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.4); }
+  100% { box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15); }
 }
 
 .button-ghost {

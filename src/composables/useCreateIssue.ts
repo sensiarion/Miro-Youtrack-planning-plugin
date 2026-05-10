@@ -328,6 +328,7 @@ export function useCreateIssue() {
     selectedAssigneeLogin,
     parentIssueId,
     linkedIssueIds,
+    transformShapeId,
     isSubmitting,
     submitError,
     canSubmit,
