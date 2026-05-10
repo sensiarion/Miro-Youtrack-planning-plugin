@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { searchIssues } from '../youtrack/client';
 import { YouTrackIssue } from '../youtrack/types';
-import { saveSettings } from '../storage';
 import TaskItem from './TaskItem.vue';
 import { useSettings } from '../composables/useSettings';
 import { useSync } from '../composables/useSync';
+import { useToast } from '../composables/useToast';
+import { METADATA_KEY } from '../constants';
 
 interface Props {
   initialQuery?: string;
@@ -15,13 +16,127 @@ const props = withDefaults(defineProps<Props>(), {
   initialQuery: '',
 });
 
-const { hasValidSettings, getEffectiveSettings } = useSettings();
+const { hasValidSettings, settings, applySettings } = useSettings();
 const { syncedTaskItems, refreshSyncedTasks, focusOnTask } = useSync();
+const { show: showToast } = useToast();
+
+const selectedNodeIssueId = ref<string | null>(null);
+
+const selectedNonPluginText = ref<string | null>(null);
+const selectedNonPluginShapeId = ref<string | null>(null);
+
+function extractText(item: any): string {
+  const candidates = [
+    item?.content,
+    item?.title,
+    item?.text,
+    item?.nodeView?.content,
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim()) {
+      // Strip HTML tags from content
+      const plain = c
+        .replace(/<br\s*\/?>(\s|&nbsp;)*/gi, ' ')
+        .replace(/<\/?[^>]+>/g, ' ')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (plain) return plain;
+    }
+  }
+  return '';
+}
+
+async function readSelectionContext(): Promise<{
+  pluginIssueId: string | null;
+  nonPluginText: string | null;
+  nonPluginShapeId: string | null;
+}> {
+  try {
+    const selection = await miro.board.getSelection();
+    if (!selection || selection.length === 0) {
+      return { pluginIssueId: null, nonPluginText: null, nonPluginShapeId: null };
+    }
+    let pluginIssueId: string | null = null;
+    let nonPluginText: string | null = null;
+    let nonPluginShapeId: string | null = null;
+    for (const item of selection) {
+      try {
+        const meta = await (item as any).getMetadata?.(METADATA_KEY);
+        if (meta && typeof meta === 'object' && typeof (meta as any).issueId === 'string') {
+          pluginIssueId = (meta as any).issueId as string;
+          continue;
+        }
+      } catch {
+        /* ignore */
+      }
+      const text = extractText(item);
+      if (text && !nonPluginText) {
+        nonPluginText = text;
+        nonPluginShapeId = (item as any)?.id ?? null;
+      }
+    }
+    return { pluginIssueId, nonPluginText, nonPluginShapeId };
+  } catch {
+    return { pluginIssueId: null, nonPluginText: null, nonPluginShapeId: null };
+  }
+}
+
+async function refreshSelection(): Promise<void> {
+  const ctx = await readSelectionContext();
+  selectedNodeIssueId.value = ctx.pluginIssueId;
+  selectedNonPluginText.value = ctx.nonPluginText;
+  selectedNonPluginShapeId.value = ctx.nonPluginShapeId;
+}
+
+async function openCanvasCreateModal(opts: { summary?: string; parent?: string; linked?: string[]; transformShapeId?: string } = {}): Promise<void> {
+  const params = new URLSearchParams();
+  if (opts.summary) params.set('summary', opts.summary);
+  if (opts.parent) params.set('parent', opts.parent);
+  if (opts.linked && opts.linked.length > 0) params.set('linked', opts.linked.join(','));
+  if (opts.transformShapeId) params.set('transform', opts.transformShapeId);
+  const qs = params.toString();
+  const url = `/create-issue.html${qs ? '?' + qs : ''}`;
+  try {
+    const result = await (miro.board.ui.openModal as any)({ url, fullscreen: false });
+    if (result && typeof result === 'object' && typeof (result as any).idReadable === 'string') {
+      const id = (result as any).idReadable as string;
+      showToast('success', `Issue ${id} created and added to board`, 5000);
+      await refreshSyncedTasks();
+    }
+  } catch (e) {
+    console.error('Failed to open create-issue modal on canvas:', e);
+    showToast('error', 'Could not open create dialog. Make sure the plugin manifest allows /create-issue.html.', 4000);
+  }
+}
+
+function handleCreateIssue() {
+  void openCanvasCreateModal({
+    summary: selectedNonPluginText.value || undefined,
+    transformShapeId: selectedNonPluginShapeId.value || undefined,
+  });
+}
+
+function handleCreateSubtask() {
+  if (!selectedNodeIssueId.value) return;
+  void openCanvasCreateModal({
+    parent: selectedNodeIssueId.value,
+    summary: selectedNonPluginText.value || undefined,
+    transformShapeId: selectedNonPluginShapeId.value || undefined,
+  });
+}
 
 const taskQuery = ref(props.initialQuery);
 const taskIssues = ref<YouTrackIssue[]>([]);
 const isLoadingTasks = ref(false);
 const taskError = ref<string | null>(null);
+const lastSearchInfo = ref<string>('');
+
+// On remount, prefer the most recently applied query (settings.value.taskQuery) over the
+// stale prop snapshot — the prop is captured at App.vue mount time and may lag.
+if (settings.value.taskQuery !== undefined && settings.value.taskQuery !== taskQuery.value) {
+  taskQuery.value = settings.value.taskQuery;
+}
 
 const boardCountByIssueId = computed(() => {
   const map = new Map<string, number>();
@@ -32,8 +147,30 @@ const boardCountByIssueId = computed(() => {
   return map;
 });
 
+let selectionListener: ((event: any) => void) | null = null;
+
 onMounted(async () => {
   await refreshSyncedTasks();
+  await refreshSelection();
+  selectionListener = () => {
+    refreshSelection();
+  };
+  try {
+    miro.board.ui.on('selection:update', selectionListener);
+  } catch (e) {
+    console.warn('Selection listener registration failed:', e);
+  }
+});
+
+onUnmounted(() => {
+  if (selectionListener) {
+    try {
+      miro.board.ui.off('selection:update', selectionListener);
+    } catch {
+      /* ignore */
+    }
+    selectionListener = null;
+  }
 });
 
 async function loadTasks(queryOverride?: string) {
@@ -44,26 +181,30 @@ async function loadTasks(queryOverride?: string) {
 
   isLoadingTasks.value = true;
   taskError.value = null;
+  lastSearchInfo.value = '';
 
   try {
     const queryToUse = queryOverride !== undefined ? queryOverride : taskQuery.value;
-    const { baseUrl, token, statusFieldName } = getEffectiveSettings();
-    
     const issues = await searchIssues({
-      baseUrl,
-      token,
+      baseUrl: settings.value.youtrackBaseUrl,
+      token: settings.value.youtrackToken,
       query: queryToUse,
-      statusFieldName,
+      statusFieldName: settings.value.statusFieldName,
     });
     taskIssues.value = issues;
+    const msg = `Found ${issues.length} task${issues.length === 1 ? '' : 's'}`;
+    lastSearchInfo.value = msg;
+    showToast('success', msg);
 
-    // Save task query to Miro board storage
-    await saveSettings({ taskQuery: queryToUse });
+    // Save the applied query so tab-switches/reloads keep the last "real" search,
+    // not in-progress edits.
+    await applySettings({ taskQuery: queryToUse });
     taskQuery.value = queryToUse;
 
     await refreshSyncedTasks();
   } catch (error: any) {
     taskError.value = error.message || 'Failed to load tasks';
+    showToast('error', taskError.value || 'Failed to load tasks', 4000);
     console.error('Failed to load tasks:', error);
   } finally {
     isLoadingTasks.value = false;
@@ -81,7 +222,32 @@ defineExpose<{
 <template>
   <div class="tab-content">
     <h2>Search YouTrack Tasks</h2>
+    <div class="create-actions">
+      <button
+        class="button button-primary"
+        :disabled="!hasValidSettings"
+        :title="selectedNonPluginText ? 'Create issue using selected shape’s text as summary; the shape itself becomes the task card.' : 'Create a new YouTrack issue and place a card on the board.'"
+        @click="handleCreateIssue"
+      >
+        <span v-if="selectedNonPluginText">+ Turn selection into task</span>
+        <span v-else>+ Create issue</span>
+      </button>
+      <button
+        v-if="selectedNodeIssueId"
+        class="button button-ghost"
+        :disabled="!hasValidSettings"
+        @click="handleCreateSubtask"
+      >+ Subtask of {{ selectedNodeIssueId }}</button>
+    </div>
+    <div v-if="selectedNonPluginText" class="selection-hint">
+      Will turn the selected shape into a task card. Summary prefilled from its text:
+      <em>{{ selectedNonPluginText }}</em>
+    </div>
+    <div v-else class="selection-hint selection-hint-muted">
+      Tip: select any shape with text on the board, then click <strong>Turn selection into task</strong> to convert it into a YouTrack issue (or right-click → <em>Create YouTrack issue</em>).
+    </div>
     <div class="form-group">
+
       <label for="task-query">Search Query:</label>
       <input 
         id="task-query"
@@ -91,7 +257,7 @@ defineExpose<{
         class="input"
         @keyup.enter="loadTasks()"
       />
-      <button 
+      <button
         class="button button-primary"
         :disabled="isLoadingTasks || !hasValidSettings"
         @click="loadTasks()"
@@ -104,6 +270,9 @@ defineExpose<{
     <div v-if="taskError" class="error">{{ taskError }}</div>
     <div v-if="!hasValidSettings" class="warning">
       Please configure YouTrack settings in the Settings tab first.
+    </div>
+    <div v-if="lastSearchInfo" class="status-pill status-success">
+      <span>✓</span> {{ lastSearchInfo }}
     </div>
 
     <div v-if="taskIssues.length > 0" class="task-list">
@@ -224,6 +393,61 @@ h2 {
 
 .task-list {
   margin-top: 16px;
+}
+
+.create-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.button-ghost {
+  background: transparent;
+  color: var(--gray-700, #374151);
+  border: 1px solid var(--gray-300, #d1d5db);
+}
+
+.button-ghost:hover:not(:disabled) {
+  background: var(--gray-100, #f3f4f6);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+
+.status-success {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.selection-hint {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  color: #0c4a6e;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.selection-hint em {
+  font-style: italic;
+  font-weight: 500;
+}
+
+.selection-hint-muted {
+  background: var(--gray-50, #f9fafb);
+  border-color: var(--gray-200, #e5e7eb);
+  color: var(--gray-600, #4b5563);
 }
 
 .empty-state {

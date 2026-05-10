@@ -4,11 +4,15 @@ import { useSettings } from '../composables/useSettings';
 import { useSync } from '../composables/useSync';
 import TaskItem from './TaskItem.vue';
 
-const { hasValidSettings, getEffectiveSettings, settings } = useSettings();
+const { hasValidSettings, settings } = useSettings();
 const {
   syncState,
   isSyncing,
   syncError,
+  syncSuccess,
+  syncCancelled,
+  syncProgress,
+  cancelSync,
   syncedTasks,
   syncedTaskItems,
   initSyncState,
@@ -34,12 +38,17 @@ watch(
   { immediate: true }
 );
 
+// On remount, take latest applied syncQuery from settings (more recent than initial)
+if (settings.value.syncQuery !== undefined && settings.value.syncQuery !== syncQuery.value) {
+  syncQuery.value = settings.value.syncQuery;
+}
+
 async function handleSync() {
   if (!hasValidSettings.value) {
     return;
   }
 
-  await performSync(syncQuery.value, getEffectiveSettings);
+  await performSync(syncQuery.value);
   
   // Update local settings ref to reflect saved query
   settings.value.syncQuery = syncQuery.value;
@@ -101,17 +110,25 @@ onMounted(async () => {
         id="sync-query"
         v-model="syncQuery"
         type="text"
-        placeholder="e.g., State: In Progress"
+        placeholder="e.g. aggregate Subtask for: Demo-1 -Demo-1 (leave empty for all recently updated)"
         class="input"
       />
-      <button 
-        class="button button-primary"
-        :disabled="isSyncing || !hasValidSettings"
-        @click="handleSync"
-      >
-        <span v-if="isSyncing">Syncing...</span>
-        <span v-else>Sync Now</span>
-      </button>
+      <div class="sync-controls">
+        <button
+          class="button button-primary"
+          :disabled="isSyncing || !hasValidSettings"
+          @click="handleSync"
+        >
+          <span v-if="isSyncing">Syncing...</span>
+          <span v-else>Sync Now</span>
+        </button>
+        <button
+          v-if="isSyncing"
+          class="button button-danger"
+          type="button"
+          @click="cancelSync"
+        >Stop</button>
+      </div>
     </div>
 
     <div class="form-group">
@@ -128,6 +145,16 @@ onMounted(async () => {
     <div v-if="syncError" class="error">{{ syncError }}</div>
     <div v-if="!hasValidSettings" class="warning">
       Please configure YouTrack settings in the Settings tab first.
+    </div>
+    <div v-if="syncProgress && isSyncing" class="status-pill status-progress" role="status">
+      <span class="spinner" aria-hidden="true"></span>
+      {{ syncProgress }}
+    </div>
+    <div v-if="syncSuccess && !isSyncing" class="status-pill status-success" role="status">
+      <span>✓</span> {{ syncSuccess }}
+    </div>
+    <div v-if="syncCancelled && !isSyncing" class="status-pill status-cancelled" role="status">
+      <span>⏹</span> {{ syncCancelled }}
     </div>
 
     <div class="sync-info">
@@ -322,5 +349,62 @@ h2 {
   color: var(--gray-500, #6b7280);
   font-size: 14px;
   line-height: 1.5;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+
+.status-success {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.status-progress {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.status-cancelled {
+  background: #fff7ed;
+  color: #9a3412;
+  border: 1px solid #fed7aa;
+}
+
+.sync-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.button-danger {
+  background: #dc2626;
+  color: #ffffff;
+  border: none;
+}
+
+.button-danger:hover { background: #b91c1c; }
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(29, 78, 216, 0.25);
+  border-top-color: #1d4ed8;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>

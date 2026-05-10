@@ -5,6 +5,7 @@ import TabNavigation from './components/TabNavigation.vue';
 import TasksTab from './components/TasksTab.vue';
 import SyncTab from './components/SyncTab.vue';
 import SettingsTab from './components/SettingsTab.vue';
+import ToastContainer from './components/ToastContainer.vue';
 import { useSettings } from './composables/useSettings';
 import { useDropHandler } from './composables/useDropHandler';
 
@@ -15,13 +16,7 @@ const tasksTabRef = ref<InstanceType<typeof TasksTab> | null>(null);
 useDropHandler();
 
 function handleSettingsSaved() {
-  activeTab.value = 'tasks';
-  setTimeout(() => {
-    if (tasksTabRef.value) {
-      const queryToUse = settings.value.taskQuery || '';
-      tasksTabRef.value.loadTasks(queryToUse);
-    }
-  }, 100);
+  // No tab switch, no auto-search — just persistence. Stay on Settings.
 }
 
 onMounted(async () => {
@@ -50,11 +45,12 @@ onMounted(async () => {
 
       <SyncTab v-if="activeTab === 'sync'" />
 
-      <SettingsTab 
+      <SettingsTab
         v-if="activeTab === 'settings'"
         @saved="handleSettingsSaved"
       />
     </div>
+    <ToastContainer />
   </div>
 </template>
 

@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue';
-import { loadSettings, saveSettings, type Settings } from '../storage';
+import { loadSettings, loadLocalCredentials, saveSettings, type Settings } from '../storage';
+import { DEFAULT_SYNC_CONCURRENCY } from '../constants';
 
 const DEFAULT_SETTINGS: Settings = {
   youtrackBaseUrl: '',
@@ -8,69 +9,44 @@ const DEFAULT_SETTINGS: Settings = {
   syncQuery: '',
   statusFieldName: 'State',
   stateColors: {},
+  connectorStyles: {},
+  connectorLinkLabels: {},
+  concurrency: DEFAULT_SYNC_CONCURRENCY,
+  deleteMissingOnSync: false,
 };
 
-// Shared state so all components see the same settings (singleton)
+// Single source of truth shared across components.
 const settings = ref<Settings>({ ...DEFAULT_SETTINGS });
-const youtrackBaseUrl = ref('');
-const youtrackToken = ref('');
-const statusFieldName = ref(DEFAULT_SETTINGS.statusFieldName);
-const stateColors = ref<Record<string, string>>({});
 
-const hasValidSettings = computed(() => {
-  if (settings.value.youtrackBaseUrl && settings.value.youtrackToken) {
-    return true;
-  }
-  return !!(youtrackBaseUrl.value && youtrackToken.value);
-});
+const hasValidSettings = computed(
+  () => !!(settings.value.youtrackBaseUrl && settings.value.youtrackToken),
+);
 
 async function initSettings(): Promise<void> {
-  const loaded = await loadSettings();
-  settings.value = loaded;
-  youtrackBaseUrl.value = loaded.youtrackBaseUrl;
-  youtrackToken.value = loaded.youtrackToken;
-  statusFieldName.value = loaded.statusFieldName;
-  stateColors.value = loaded.stateColors ?? {};
+  // Surface URL + token from localStorage synchronously so search/sync work even if
+  // Miro board storage is slow.
+  const local = loadLocalCredentials();
+  settings.value = { ...settings.value, ...local };
+
+  try {
+    const loaded = await loadSettings();
+    settings.value = loaded;
+  } catch (e) {
+    console.warn('Board settings load failed; using local credentials only:', e);
+  }
 }
 
-async function saveSettingsData(): Promise<Partial<Settings>> {
-  const newSettings: Partial<Settings> = {
-    youtrackBaseUrl: youtrackBaseUrl.value,
-    youtrackToken: youtrackToken.value,
-    statusFieldName: statusFieldName.value,
-    stateColors: stateColors.value,
-  };
-  await saveSettings(newSettings);
-  settings.value = { ...settings.value, ...newSettings };
-  return newSettings;
-}
-
-function getEffectiveSettings() {
-  return {
-    baseUrl: settings.value.youtrackBaseUrl || youtrackBaseUrl.value,
-    token: settings.value.youtrackToken || youtrackToken.value,
-    statusFieldName: settings.value.statusFieldName || statusFieldName.value,
-    stateColors: stateColors.value,
-  };
-}
-
-/** Update in-memory state colors (e.g. after sync merges new states). Call after saveSettings({ stateColors }). */
-function updateStateColors(record: Record<string, string>): void {
-  stateColors.value = record;
-  settings.value = { ...settings.value, stateColors: record };
+/** Persist a partial settings update and reflect it in the in-memory `settings` ref. */
+async function applySettings(patch: Partial<Settings>): Promise<void> {
+  await saveSettings(patch);
+  settings.value = { ...settings.value, ...patch };
 }
 
 export function useSettings() {
   return {
     settings,
-    youtrackBaseUrl,
-    youtrackToken,
-    statusFieldName,
-    stateColors,
     hasValidSettings,
     initSettings,
-    saveSettingsData,
-    getEffectiveSettings,
-    updateStateColors,
+    applySettings,
   };
 }

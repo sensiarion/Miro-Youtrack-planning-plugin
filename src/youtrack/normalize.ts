@@ -1,22 +1,6 @@
 import { YouTrackIssue } from './types';
 
 // YouTrack REST API response types (partial, only what we need)
-interface YouTrackApiIssue {
-  idReadable?: string;
-  summary?: string;
-  tags?: Array<{ name?: string; color?: { id?: string; background?: string; foreground?: string } }>;
-  customFields?: Array<{
-    name?: string;
-    value?: { 
-      name?: string;
-      localizedName?: string;
-      $type?: string;
-    };
-  }>;
-  assignee?: { name?: string; login?: string } | null;
-  $type?: string;
-}
-
 interface YouTrackApiResponse {
   idReadable?: string;
   summary?: string;
@@ -98,8 +82,10 @@ export function normalizeIssue(issue: YouTrackApiResponse, baseUrl: string, stat
     }
   }
   
-  // Build issue URL
-  const url = `${baseUrl.replace(/\/$/, '')}/issue/${idReadable}`;
+  // Build issue URL — ensure scheme is present (storage normalizes on save, but defend here too)
+  const trimmed = (baseUrl || '').trim();
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  const url = `${withScheme.replace(/\/+$/, '')}/issue/${idReadable}`;
   
   return {
     idReadable,

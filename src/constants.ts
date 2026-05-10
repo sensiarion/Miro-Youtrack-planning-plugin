@@ -54,9 +54,61 @@ export const TASK_SHAPE_HEIGHT = 100;
 // Frame title for "Not found" items
 export const NOT_FOUND_FRAME_TITLE = 'Not found';
 
-// Storage: token only in localStorage (user-side); board settings in Miro board storage
-export const STORAGE_KEYS = {
+// localStorage keys: URL plain, token XOR-obfuscated. Per-user, persist across boards.
+export const LOCAL_STORAGE_KEYS = {
+  URL: 'youtrack-plan-mindmap:url',
   TOKEN: 'youtrack-plan-mindmap:token',
+  LAST_PROJECT: 'youtrack-plan-mindmap:lastProject',
 } as const;
 
+// XOR key for cheap token obfuscation (NOT security; just hides from casual DevTools peek)
+export const TOKEN_OBFUSCATION_KEY = 'yt-mm-v1-xor';
+export const OBFUSCATED_TOKEN_PREFIX = 'xor1:';
+
 export const MIRO_BOARD_COLLECTION = 'youtrack-sync' as const;
+
+// Sync concurrency
+export const DEFAULT_SYNC_CONCURRENCY = 3;
+export const MIN_SYNC_CONCURRENCY = 1;
+export const MAX_SYNC_CONCURRENCY = 10;
+
+// Connector styles
+export type ConnectorStrokeStyle = 'normal' | 'dashed' | 'dotted';
+export type ConnectorEndCap = 'none' | 'stealth' | 'filled_arrow' | 'rounded_stealth';
+
+export interface ConnectorStyle {
+  strokeStyle: ConnectorStrokeStyle;
+  endStrokeCap: ConnectorEndCap;
+  strokeColor: string; // hex
+  strokeWidth: number; // 1–4
+}
+
+export const DEFAULT_CONNECTOR_STYLE: ConnectorStyle = {
+  strokeStyle: 'dashed',
+  endStrokeCap: 'none',
+  strokeColor: '#1a1a1a',
+  strokeWidth: 2,
+};
+
+export const CONNECTOR_STROKE_STYLE_OPTIONS: { value: ConnectorStrokeStyle; label: string }[] = [
+  { value: 'normal', label: 'Solid' },
+  { value: 'dashed', label: 'Dashed' },
+  { value: 'dotted', label: 'Dotted' },
+];
+
+export const CONNECTOR_END_CAP_OPTIONS: { value: ConnectorEndCap; label: string }[] = [
+  { value: 'none', label: 'No arrow' },
+  { value: 'stealth', label: 'Stealth' },
+  { value: 'filled_arrow', label: 'Filled arrow' },
+  { value: 'rounded_stealth', label: 'Rounded' },
+];
+
+export const CONNECTOR_COLOR_PALETTE = [
+  '#1a1a1a', // black
+  '#6b7280', // gray
+  '#2563eb', // blue
+  '#dc2626', // red
+  '#16a34a', // green
+  '#d97706', // orange
+  '#9333ea', // purple
+] as const;

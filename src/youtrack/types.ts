@@ -7,8 +7,11 @@ export interface YouTrackTag {
 export interface YouTrackIssueLink {
   linkType: {
     name: string;
+    localizedName?: string | null;
     sourceToTarget: string; // e.g., "depends on"
     targetToSource: string; // e.g., "is required for"
+    localizedSourceToTarget?: string | null;
+    localizedTargetToSource?: string | null;
   };
   issues: Array<{
     id: string;
