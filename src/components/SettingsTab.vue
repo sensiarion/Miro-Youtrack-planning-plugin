@@ -34,15 +34,20 @@ const connectorStyleEntries = computed(() =>
 );
 
 function setStateColor(stateName: string, color: string) {
-  settings.value.stateColors = { ...settings.value.stateColors, [stateName]: color };
+  const next = { ...settings.value.stateColors, [stateName]: color };
+  settings.value.stateColors = next;
+  // Auto-persist appearance edits — survives sync, no Save click required.
+  void applySettings({ stateColors: next });
 }
 
 function patchConnectorStyle(linkType: string, patch: Partial<ConnectorStyle>) {
   const current = settings.value.connectorStyles[linkType] ?? { ...DEFAULT_CONNECTOR_STYLE };
-  settings.value.connectorStyles = {
+  const next = {
     ...settings.value.connectorStyles,
     [linkType]: { ...current, ...patch },
   };
+  settings.value.connectorStyles = next;
+  void applySettings({ connectorStyles: next });
 }
 
 function setStrokeColor(linkType: string, value: string) {

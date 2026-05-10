@@ -1,7 +1,6 @@
 import { ref } from 'vue';
 import {
   loadSyncState,
-  loadSettings,
   saveSyncState,
   type SyncState,
 } from '../storage';
@@ -190,8 +189,7 @@ export function useSync() {
 
     try {
       const concurrency = clampConcurrency(settings.value.concurrency || DEFAULT_SYNC_CONCURRENCY);
-      const freshSettings = await loadSettings();
-      const previousStateColors = freshSettings.stateColors ?? {};
+      const previousStateColors = settings.value.stateColors ?? {};
 
       const baseUrl = settings.value.youtrackBaseUrl;
       const token = settings.value.youtrackToken;
@@ -489,7 +487,7 @@ export function useSync() {
 
       // Sync connectors with discovered link types and configured styles.
       // Use previously-saved styles as the source of truth for current run; prune after.
-      const previousConnectorStyles = freshSettings.connectorStyles ?? {};
+      const previousConnectorStyles = settings.value.connectorStyles ?? {};
       syncProgress.value = 'Syncing connectors…';
       const discoveredLabels = new Map<string, string>();
       const discoveredLinkTypes = await syncConnectors(

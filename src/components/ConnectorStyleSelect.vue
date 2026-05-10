@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onBeforeUnmount } from 'vue';
+import { computed, ref, onBeforeUnmount, nextTick } from 'vue';
 import {
   CONNECTOR_STROKE_STYLE_OPTIONS,
   CONNECTOR_END_CAP_OPTIONS,
@@ -7,7 +7,7 @@ import {
   type ConnectorEndCap,
 } from '../constants';
 
-const props = defineProps<{
+defineProps<{
   strokeStyle: ConnectorStrokeStyle;
   endStrokeCap: ConnectorEndCap;
   strokeColor: string;
@@ -20,6 +20,12 @@ const emit = defineEmits<{
 
 const open = ref(false);
 const rootEl = ref<HTMLElement | null>(null);
+const menuEl = ref<HTMLElement | null>(null);
+const menuStyle = ref<{ top: string; left: string; minWidth: string }>({
+  top: '0px',
+  left: '0px',
+  minWidth: '220px',
+});
 
 interface Option {
   line: ConnectorStrokeStyle;
@@ -43,8 +49,34 @@ function dashFor(style: ConnectorStrokeStyle): string {
   return '0';
 }
 
-function toggle() {
+function recomputePosition() {
+  const trigger = rootEl.value?.querySelector('.conn-select-trigger') as HTMLElement | null;
+  if (!trigger) return;
+  const rect = trigger.getBoundingClientRect();
+  const menuMaxHeight = 320;
+  const margin = 4;
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const placeAbove = spaceBelow < 200 && rect.top > 200;
+  const top = placeAbove
+    ? Math.max(margin, rect.top - menuMaxHeight - margin)
+    : Math.min(window.innerHeight - margin, rect.bottom + margin);
+  const left = Math.max(
+    margin,
+    Math.min(window.innerWidth - 240, rect.left),
+  );
+  menuStyle.value = {
+    top: `${top}px`,
+    left: `${left}px`,
+    minWidth: `${Math.max(220, rect.width)}px`,
+  };
+}
+
+async function toggle() {
   open.value = !open.value;
+  if (open.value) {
+    await nextTick();
+    recomputePosition();
+  }
 }
 function close() {
   open.value = false;
@@ -55,18 +87,27 @@ function pick(opt: Option) {
 }
 
 function onDocClick(e: MouseEvent) {
-  if (!rootEl.value) return;
-  if (!rootEl.value.contains(e.target as Node)) close();
+  const target = e.target as Node;
+  if (rootEl.value?.contains(target)) return;
+  if (menuEl.value?.contains(target)) return;
+  close();
 }
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') close();
 }
+function onScrollOrResize() {
+  if (open.value) recomputePosition();
+}
 
 document.addEventListener('mousedown', onDocClick);
 document.addEventListener('keydown', onKey);
+window.addEventListener('resize', onScrollOrResize);
+window.addEventListener('scroll', onScrollOrResize, true);
 onBeforeUnmount(() => {
   document.removeEventListener('mousedown', onDocClick);
   document.removeEventListener('keydown', onKey);
+  window.removeEventListener('resize', onScrollOrResize);
+  window.removeEventListener('scroll', onScrollOrResize, true);
 });
 </script>
 
@@ -110,7 +151,14 @@ onBeforeUnmount(() => {
       <span class="caret" aria-hidden="true">▾</span>
     </button>
 
-    <div v-if="open" class="conn-select-menu" role="listbox">
+    <Teleport to="body">
+    <div
+      v-if="open"
+      ref="menuEl"
+      class="conn-select-menu"
+      role="listbox"
+      :style="menuStyle"
+    >
       <button
         v-for="opt in options"
         :key="`${opt.line}-${opt.arrow}`"
@@ -153,6 +201,7 @@ onBeforeUnmount(() => {
         <span class="label">{{ opt.label }}</span>
       </button>
     </div>
+    </Teleport>
   </div>
 </template>
 
@@ -190,15 +239,17 @@ onBeforeUnmount(() => {
   color: var(--gray-500, #6b7280);
 }
 
+</style>
+
+<!-- Menu is teleported to body; styles must be global so scoped pruning skips them. -->
+<style>
 .conn-select-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
+  position: fixed;
   background: #ffffff;
   border: 1px solid var(--gray-200, #e5e7eb);
   border-radius: 6px;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
-  z-index: 30;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  z-index: 9999;
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -207,7 +258,7 @@ onBeforeUnmount(() => {
   overflow-y: auto;
 }
 
-.conn-option {
+.conn-select-menu .conn-option {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -219,18 +270,19 @@ onBeforeUnmount(() => {
   font-size: 13px;
   color: var(--gray-700, #374151);
   text-align: left;
+  font-family: inherit;
 }
 
-.conn-option:hover {
+.conn-select-menu .conn-option:hover {
   background: var(--gray-100, #f3f4f6);
 }
 
-.conn-option.selected {
+.conn-select-menu .conn-option.selected {
   background: #e0f2fe;
   color: #075985;
 }
 
-.label {
+.conn-select-menu .label {
   white-space: nowrap;
 }
 </style>
