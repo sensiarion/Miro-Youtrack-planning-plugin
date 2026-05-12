@@ -12,7 +12,6 @@ After rearranging, you can get visualization of your working flow to track it
 ## Install (users)
 
 - ~~**Miro marketplace**: search "YouTrack" in the Miro Apps panel and add it.~~
-  - currently, plugin approach is not passing Security guidelines of miro marketplace
 - From install url https://miro.com/app-install/?response_type=code&client_id=3458764656911449227&redirect_uri=%2Fapp-install%2Fconfirm%2F 
    
 
