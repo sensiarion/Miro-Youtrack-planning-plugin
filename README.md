@@ -3,7 +3,8 @@
 Visualize YouTrack issues on a Miro board, sync state and links, create new
 issues from board selection.
 
-[usage_example.mp4](docs/screenshots/usage_example.mp4)
+<video src="./docs/screenshots/usage_example.mp4" controls="controls" style="max-width: 100%;">
+</video>
 
 After rearranging, you can get visualization of your working flow to track it
 
