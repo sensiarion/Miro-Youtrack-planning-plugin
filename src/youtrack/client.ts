@@ -1,5 +1,6 @@
 import { YouTrackIssue, YouTrackIssueLink } from './types';
 import { normalizeIssue } from './normalize';
+import { MENTIONS_LINK_TYPE_NAME } from '../constants';
 
 export interface SearchIssuesParams {
   baseUrl: string;
@@ -110,8 +111,8 @@ export async function fetchIssueLinks(params: FetchIssueLinksParams): Promise<Yo
   }
   
   // YouTrack REST API: get links for an issue
-  // Fields include linkType with direction info and related issues
-  const linksUrl = `${trimBase(baseUrl)}/api/issues/${issueId}/links?fields=linkType(name,localizedName,sourceToTarget,targetToSource,localizedSourceToTarget,localizedTargetToSource),issues(id,idReadable,summary)`;
+  // Fields include linkType with direction info, related issues, and per-link direction.
+  const linksUrl = `${trimBase(baseUrl)}/api/issues/${issueId}/links?fields=direction,linkType(name,localizedName,sourceToTarget,targetToSource,localizedSourceToTarget,localizedTargetToSource),issues(id,idReadable,summary)`;
   
   try {
     const response = await fetch(linksUrl, {
@@ -137,13 +138,16 @@ export async function fetchIssueLinks(params: FetchIssueLinksParams): Promise<Yo
       return [];
     }
     
-    // Normalize links - determine direction based on linkType
+    // Normalize links — preserve API direction so the connector renderer can
+    // orient arrows canonically (source → target) regardless of which endpoint
+    // we are fetching links for.
     return links.map((link: any) => {
       const linkType = link.linkType || {};
       const issues = link.issues || [];
-      
-      // Determine direction: if sourceToTarget exists, it's an outward link
-      // YouTrack API returns links where this issue is the source
+      const rawDir = typeof link.direction === 'string' ? link.direction.toLowerCase() : 'outward';
+      const direction: 'outward' | 'inward' | 'both' =
+        rawDir === 'inward' ? 'inward' : rawDir === 'both' ? 'both' : 'outward';
+
       return {
         linkType: {
           name: linkType.name || '',
@@ -158,7 +162,7 @@ export async function fetchIssueLinks(params: FetchIssueLinksParams): Promise<Yo
           idReadable: issue.idReadable || '',
           summary: issue.summary || '',
         })),
-        direction: 'outward' as const, // Links from API are always outward from the requested issue
+        direction,
       };
     });
   } catch (error) {
@@ -346,18 +350,92 @@ export async function fetchIssuesLinks(
   issueIds: string[]
 ): Promise<Map<string, YouTrackIssueLink[]>> {
   const linksMap = new Map<string, YouTrackIssueLink[]>();
-  
+
   // Fetch links for all issues in parallel
   const linkPromises = issueIds.map(async (issueId) => {
     const links = await fetchIssueLinks({ baseUrl, token, issueId });
     return { issueId, links };
   });
-  
+
   const results = await Promise.all(linkPromises);
-  
+
   results.forEach(({ issueId, links }) => {
     linksMap.set(issueId, links);
   });
-  
+
   return linksMap;
+}
+
+/**
+ * Issue ID reference pattern: PROJECT_KEY-NUMBER (e.g. CRPPO-976, NP-113).
+ * Same shape YouTrack uses for `idReadable`. We require at least one letter
+ * followed by digits to avoid matching arbitrary tokens.
+ */
+const ISSUE_REF_PATTERN = /\b([A-Z][A-Z0-9_]*-\d+)\b/g;
+
+/**
+ * Fetch mention-based references for an issue by scanning description + comments
+ * for issue ID patterns and returning them as a synthesized "Mentions" link.
+ * Excludes self-references.
+ */
+export async function fetchIssueMentions(
+  baseUrl: string,
+  token: string,
+  issueId: string,
+): Promise<YouTrackIssueLink[]> {
+  if (!baseUrl || !token || !issueId) return [];
+
+  const url =
+    `${trimBase(baseUrl)}/api/issues/${issueId}` +
+    `?fields=description,comments(text)`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) return [];
+    const data = await response.json();
+
+    const haystack: string[] = [];
+    if (typeof data.description === 'string') haystack.push(data.description);
+    if (Array.isArray(data.comments)) {
+      for (const c of data.comments) {
+        if (c && typeof c.text === 'string') haystack.push(c.text);
+      }
+    }
+
+    const refs = new Set<string>();
+    for (const text of haystack) {
+      ISSUE_REF_PATTERN.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = ISSUE_REF_PATTERN.exec(text)) !== null) {
+        const ref = m[1];
+        if (ref && ref !== issueId) refs.add(ref);
+      }
+    }
+
+    if (refs.size === 0) return [];
+
+    return [{
+      linkType: {
+        name: MENTIONS_LINK_TYPE_NAME,
+        localizedName: null,
+        sourceToTarget: 'mentions',
+        targetToSource: 'is mentioned in',
+        localizedSourceToTarget: null,
+        localizedTargetToSource: null,
+      },
+      issues: Array.from(refs).map(idReadable => ({ id: '', idReadable, summary: '' })),
+      direction: 'outward' as const,
+    }];
+  } catch (error) {
+    console.warn(`Failed to fetch mentions for issue ${issueId}:`, error);
+    return [];
+  }
 }

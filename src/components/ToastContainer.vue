@@ -26,7 +26,7 @@ const { toasts, dismiss } = useToast();
 <style scoped>
 .toast-container {
   position: fixed;
-  top: 12px;
+  top: 56px;
   right: 12px;
   display: flex;
   flex-direction: column;

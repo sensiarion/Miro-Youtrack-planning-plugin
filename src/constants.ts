@@ -90,6 +90,24 @@ export const DEFAULT_CONNECTOR_STYLE: ConnectorStyle = {
   strokeWidth: 2,
 };
 
+/**
+ * Concrete defaults for YouTrack's standard link types. Pre-seeded so users can see
+ * and customize them in Settings before running any sync. Names match the canonical
+ * (English) link type names returned by `/api/issues/.../links` (linkType.name).
+ *
+ * "Mentions" is included as a virtual link type synthesized from issue
+ * description + comments references (see fetchIssueMentions).
+ */
+export const DEFAULT_LINK_TYPE_STYLES: Record<string, ConnectorStyle> = {
+  Subtask: { strokeStyle: 'normal', endStrokeCap: 'filled_arrow', strokeColor: '#2563eb', strokeWidth: 3 },
+  Depend: { strokeStyle: 'normal', endStrokeCap: 'stealth', strokeColor: '#dc2626', strokeWidth: 2 },
+  Duplicate: { strokeStyle: 'dashed', endStrokeCap: 'stealth', strokeColor: '#9333ea', strokeWidth: 2 },
+  Relates: { strokeStyle: 'dashed', endStrokeCap: 'none', strokeColor: '#9ca3af', strokeWidth: 1 },
+  Mentions: { strokeStyle: 'dotted', endStrokeCap: 'none', strokeColor: '#94a3b8', strokeWidth: 1 },
+};
+
+export const MENTIONS_LINK_TYPE_NAME = 'Mentions';
+
 export const CONNECTOR_STROKE_STYLE_OPTIONS: { value: ConnectorStrokeStyle; label: string }[] = [
   { value: 'normal', label: 'Solid' },
   { value: 'dashed', label: 'Dashed' },

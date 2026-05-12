@@ -1,267 +1,99 @@
-# YouTrack Plan Mindmap
+# YouTrack ↔ Miro plugin
 
-A powerful Miro plugin that seamlessly integrates YouTrack issue tracking with Miro boards. Visualize your YouTrack issues as interactive cards on Miro boards, automatically sync their states, and visualize relationships between issues with intelligent connectors.
+Visualize YouTrack issues on a Miro board, sync state and links, create new
+issues from board selection.
 
-## Features
+[usage_example.mp4](docs/screenshots/usage_example.mp4)
 
-### 🔍 Task Search and Discovery
-- **YouTrack Query Interface**: Search for tasks using YouTrack query syntax
-- **Real-time Search**: Instant search results with loading states and error handling
-- **Virtual Scroll List**: Efficiently displays large result sets
-- **Default Search**: Automatically loads all issues sorted by update date when settings are configured
+After rearranging, you can get visualization of your working flow to track it
 
-### 🎯 Drag and Drop Integration
-- **Drag Tasks to Board**: Simply drag tasks from the plugin panel directly onto the Miro board
-- **Mindmap Node Creation**: Tasks are created as styled mindmap nodes
-- **Automatic Positioning**: Tasks are placed at the exact drop location on the board
+![example_result.png](docs/screenshots/example_result.png)
 
-### 🔄 Task Synchronization
-- **Bidirectional Sync**: Sync tasks from YouTrack to Miro board with a single click
-- **Smart Updates**: Automatically updates task states, colors, and content based on YouTrack data
-- **Missing Task Handling**: Creates missing tasks in a "Not found" frame when they exist in YouTrack but not on the board
-- **Sync Statistics**: Tracks and displays sync metrics (found issues, updated count, created count)
-- **Live Refresh**: Automatically refreshes the task list when new cards are added to the board
+## Install (users)
 
-### 🔗 Issue Links and Relationships
-- **Visual Connectors**: Automatically creates visual connections between linked issues
-- **Dotted Lines**: Regular links (e.g., "relates to") are shown as dotted lines
-- **Solid Arrows**: Dependencies (e.g., "depends on", "blocked by") are shown as solid arrows pointing to the blocked task
-- **Automatic Sync**: Connectors are automatically created, updated, and removed during sync operations
-- **Smart Cleanup**: Only manages connectors between task nodes, preserving user-created connections to other items
+- **Miro marketplace**: search "YouTrack" in the Miro Apps panel and add it.
 
-### 📊 Visual Task Representation
-- **Color-Coded States**: Tasks are automatically color-coded by state:
-  - **🟡 Yellow**: Planning/Todo/Backlog states
-  - **🟢 Green**: In Work/In Progress/On Desk states
-  - **🟣 Purple**: Done/Resolved/Completed states
-- **Tag Colors**: Tags display with their YouTrack-assigned colors
-- **Localized State Names**: Uses localized state names when available from YouTrack
-- **Rich Information**: Each card displays task ID, summary, assignee, state, and tags
+Then open any board and launch the plugin from the apps panel.
 
-### 🖱️ Interactive Sync Tab
-- **Always Visible**: Shows all synced tasks on the board, even before running sync
-- **Clickable Cards**: Click any task card to zoom to and focus on it on the board
-- **Search Functionality**: Filter tasks by ID, summary, assignee, state, or tags
-- **Live Updates**: Task list automatically refreshes when new cards are added
+(plugin is hosted here, on github pages https://sensiarion.github.io/Miro-Youtrack-planning-plugin/)
 
-### ⚙️ Settings and Configuration
-- **YouTrack Instance URL**: Configure your YouTrack server URL (stored per board in Miro)
-- **API Token**: Stored in browser local storage (user-side only, not shared with board)
-- **Status Field Name**: Configurable field name for state tracking (default: "State", stored per board)
-- **Board Storage**: Task query, sync query, instance URL, and status field are stored in Miro board storage so they follow the board and are shared with collaborators
-- **Token**: YouTrack token stays in local storage for security and persists on the user's device
+## Setup
 
-## Quick Start
+In the **Settings** tab fill in:
 
-### Prerequisites
-- Node.js 14.13+ and npm
-- A Miro Developer account
-- A YouTrack instance with REST API enabled
-- A YouTrack permanent token
+- YouTrack instance URL (e.g. `https://utrack.example.com`)
+- Permanent token ([how to create a token](https://www.jetbrains.com/help/youtrack/cloud/manage-permanent-token.html))
+- Status field name (default `State`)
 
-### Installation
+URL + token are stored on your device (token lightly obfuscated). Per-board
+settings (queries, colors, connector styles) live in Miro board storage.
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd yotrack-plan-mindmap
-   ```
+![Settings tab — Connection (URL + token + status field) and Appearance (state colors + per-link-type connector styles).](docs/screenshots/01-settings.png)
 
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
+## Search & drop tasks
 
-3. **Start development server**
-   ```bash
-   npm start
-   ```
-   Your URL should be similar to: `http://localhost:3000`
+**Tasks** tab → type
+a [YouTrack query](https://www.jetbrains.com/help/youtrack/cloud/search-and-command-attributes.html) → drag any
+issue onto the board. Card auto-styled by state color.
 
-4. **Configure in Miro**
-   - Go to [Miro App Settings](https://developers.miro.com/docs/build-your-first-hello-world-app#step-3-configure-your-app-in-miro)
-   - Paste your local URL under **App URL**
-   - Open a board; you should see the app in the app toolbar or in the **Apps** panel
+![Tasks tab — search query input, scrollable issue list, drag-drop to board.](docs/screenshots/02-tasks-search.png)
 
-### Build for Production
+## Sync
 
-```bash
-npm run build
-```
+**Sync** tab → enter a sync query → run. Plugin:
 
-This generates a static output in the `dist/` directory, which you can host on any static hosting service.
+- Updates existing plugin-managed cards (state color, summary, assignee).
+- Creates missing cards in a "Not found" frame.
+- Builds connectors between linked cards (Subtask / Depend / Relates / Duplicate / Mentions).
+- Optional: delete cards whose issue is no longer in query results.
 
-## Usage
+Sync is cancellable mid-run.
 
-### Initial Setup
+![Sync tab — query, progress, list of synced tasks (click to focus on board).](docs/screenshots/03-sync.png)
 
-1. Open the plugin in Miro
-2. Go to the **Settings** tab
-3. Enter your YouTrack instance URL (e.g., `https://youtrack.example.com`)
-4. Enter your YouTrack permanent token
-5. Optionally configure the status field name (default: "State")
-6. Click "Save Settings"
-7. The plugin automatically loads tasks
+## Connectors
 
-### Searching and Adding Tasks
+Each YouTrack link type renders with a configurable style: line (solid /
+dashed / dotted), end cap (none / stealth / filled arrow / rounded), color, width.
 
-1. Go to the **Tasks** tab
-2. Enter a search query (e.g., `State: In Progress`) or leave empty for all tasks
-3. Click "Search"
-4. Drag tasks from the list onto the board
-5. Tasks appear as color-coded mindmap nodes
+Built-in defaults:
 
-### Synchronizing Tasks
+- **Subtask** — solid blue with filled arrow (parent → child)
+- **Depend** — solid red with stealth arrow (blocker → blocked)
+- **Duplicate** — dashed purple with arrow
+- **Relates** — dashed gray, no arrow (symmetric)
+- **Mentions** — dotted slate, no arrow (parsed from descriptions/comments)
 
-1. Go to the **Sync** tab
-2. Enter a sync query (e.g., `State: In Progress`)
-3. Click "Sync Now"
-4. Existing tasks are automatically updated with latest data
-5. Missing tasks are created in a "Not found" frame
-6. Issue links and dependencies are automatically visualized with connectors
+Arrow direction follows YouTrack link source → target regardless of which
+end is iterated, so siblings render consistently.
 
-### Viewing Synced Tasks
+![Board view — mixed cards with subtask/depend/mentions connectors styled per link type.](docs/screenshots/04-board-connectors.png)
 
-1. Go to the **Sync** tab
-2. All synced tasks on the board are displayed automatically
-3. Use the search box to filter tasks by any field
-4. Click any task card to zoom to and focus on it on the board
+Customize per link type in **Settings → Appearance**. Changes persist on the
+board immediately, survive future syncs.
 
-## Technical Details
+## Create issue from board
 
-### Tech Stack
-- **Vue 3**: Reactive UI framework with Composition API
-- **TypeScript**: Type-safe development
-- **Vite**: Fast build tool and dev server
-- **Miro Web SDK v2**: Integration with Miro platform
+Select an existing plugin-managed card → right-click → **"Create YouTrack
+subtask"**. Or use **"+ Create issue"** in Tasks tab.
 
-### Project Structure
-```
-src/
-├── App.vue              # Main Vue component with tabbed UI
-├── app.ts               # Vue app initialization
-├── index.ts             # Miro SDK initialization
-├── constants.ts         # Configuration constants
-├── storage.ts           # Miro board storage + localStorage (token only)
-├── components/          # Vue components
-│   ├── SyncTab.vue      # Sync tab with task list and search
-│   ├── TasksTab.vue     # Task search and drag interface
-│   ├── SettingsTab.vue  # Settings configuration
-│   └── TaskItem.vue     # Task card component
-├── composables/         # Vue composables
-│   ├── useSync.ts       # Sync logic and connector management
-│   ├── useSettings.ts   # Settings management
-│   └── useDropHandler.ts # Drag and drop handling
-├── youtrack/            # YouTrack integration
-│   ├── types.ts         # TypeScript interfaces
-│   ├── client.ts        # REST API client
-│   └── normalize.ts     # Data normalization
-└── miro/                # Miro board integration
-    ├── taskShape.ts     # Mindmap node creation
-    ├── connectors.ts    # Connector management
-    └── notFoundFrame.ts # Frame management
-```
+Inline panel with project + summary + description + assignee + parent +
+linked-issues fields. On save the issue is created in YouTrack and a new
+card placed on the board.
 
-### API Integration
+![Create issue panel — inline form pre-filled with selection summary and parent.](docs/screenshots/06-create-issue.png)
 
-#### YouTrack REST API
-- **Authentication**: Bearer token authentication
-- **Search Endpoint**: `/api/issues?query=...&fields=...`
-- **Links Endpoint**: `/api/issues/{issueId}/links?fields=...`
-- **Requested Fields**: idReadable, summary, tags with colors, customFields (state with localization), assignee, issue links
-
-#### Miro Web SDK
-- **Mindmap Nodes**: Uses `miro.board.experimental.createMindmapNode()` for task cards
-- **Connectors**: Uses `miro.board.createConnector()` for issue relationships
-- **Metadata API**: Stores YouTrack data in node/connector metadata
-- **Drag and Drop**: Uses `miro.board.ui.on('drop', ...)` event handler
-- **Viewport**: Uses `miro.board.viewport.zoomTo()` for navigation
-
-## Configuration
-
-### Constants
-- Task state colors (Planning, In Work, Done)
-- Fill opacity for task nodes
-- Default dimensions for task shapes
-- Metadata key names
-- Frame titles
-
-### Storage
-- **Settings**: YouTrack URL, token, queries, status field name
-- **Sync State**: Last sync time, statistics
-
-## Examples
-
-### Example Queries
-
-**Find all issues in progress:**
-```
-State: In Progress
-```
-
-**Find issues assigned to a user:**
-```
-Assignee: john.doe
-```
-
-**Find issues with a specific tag:**
-```
-#bug
-```
-
-**Combine conditions:**
-```
-State: In Progress AND Assignee: john.doe
-```
-
-## Notes
-
-- Mindmap nodes use experimental Miro API - subject to change
-- Requires YouTrack instance with REST API enabled
-- CORS must be configured on YouTrack instance for browser requests
-- Local storage is used for persistence (not synced across devices)
-- Connectors are automatically managed during sync - manual connectors between task nodes may be removed
-
-## Development
-
-### Folder Structure
-
-```
-.
-├── src
-│   ├── assets
-│   │   └── style.css
-│   ├── components
-│   ├── composables
-│   ├── miro
-│   ├── youtrack
-│   ├── app.ts
-│   └── index.ts
-├── app.html       # The app itself
-└── index.html     # The app entry point
-```
-
-### Development Commands
+## Develop
 
 ```bash
-# Install dependencies
 npm install
-
-# Start development server
-npm start
-
-# Build for production
-npm run build
+npm start          # http://localhost:3000
+npm run build      # dist/
 ```
+
+Point a Miro dev app at `http://localhost:3000` (see
+[Miro docs](https://developers.miro.com/docs/build-your-first-hello-world-app)).
 
 ## License
 
-[Add your license here]
-
-## Contributing
-
-[Add contribution guidelines here]
-
----
-
-Built using [`create-miro-app`](https://www.npmjs.com/package/create-miro-app) and [Vite](https://vitejs.dev/).
+MIT

@@ -1,18 +1,25 @@
-import { DEFAULT_CONNECTOR_STYLE, type ConnectorStyle } from '../constants';
+import {
+  DEFAULT_CONNECTOR_STYLE,
+  DEFAULT_LINK_TYPE_STYLES,
+  type ConnectorStyle,
+} from '../constants';
 
 /** Metadata key for identifying plugin-managed connectors. */
 const CONNECTOR_METADATA_KEY = 'youtrack-connector';
 
-/** Resolve connector style for a YouTrack link type. Falls back to the generic default. */
+/** Resolve connector style for a YouTrack link type. Falls back to type-specific default. */
 export function getStyleForLinkType(
   linkTypeName: string,
   configMap: Record<string, ConnectorStyle> | undefined,
 ): ConnectorStyle {
-  return configMap?.[linkTypeName] ?? { ...DEFAULT_CONNECTOR_STYLE };
+  return configMap?.[linkTypeName] ?? getDefaultStyleForLinkType(linkTypeName);
 }
 
-/** Default style for a newly-discovered link type. */
-export function getDefaultStyleForLinkType(): ConnectorStyle {
+/** Default style for a link type: type-specific if known, else the generic default. */
+export function getDefaultStyleForLinkType(linkTypeName?: string): ConnectorStyle {
+  if (linkTypeName && DEFAULT_LINK_TYPE_STYLES[linkTypeName]) {
+    return { ...DEFAULT_LINK_TYPE_STYLES[linkTypeName] };
+  }
   return { ...DEFAULT_CONNECTOR_STYLE };
 }
 

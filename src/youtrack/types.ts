@@ -18,7 +18,8 @@ export interface YouTrackIssueLink {
     idReadable: string;
     summary: string;
   }>;
-  direction: 'outward' | 'inward'; // outward = this issue links to others, inward = others link to this
+  /** outward = queried issue is link source; inward = queried issue is link target; both = symmetric */
+  direction: 'outward' | 'inward' | 'both';
 }
 
 export interface YouTrackIssue {

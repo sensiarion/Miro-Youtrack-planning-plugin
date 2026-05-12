@@ -110,7 +110,7 @@ onMounted(async () => {
         id="sync-query"
         v-model="syncQuery"
         type="text"
-        placeholder="e.g. aggregate Subtask for: Demo-1 -Demo-1 (leave empty for all recently updated)"
+        placeholder="e.g. aggregate Subtask of: DEMO-2 -DEMO-2 (leave empty for all recently updated)"
         class="input"
       />
       <div class="sync-controls">

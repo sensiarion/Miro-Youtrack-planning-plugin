@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue';
 import { loadSettings, loadLocalCredentials, saveSettings, type Settings } from '../storage';
-import { DEFAULT_SYNC_CONCURRENCY } from '../constants';
+import { DEFAULT_SYNC_CONCURRENCY, DEFAULT_LINK_TYPE_STYLES } from '../constants';
 
 const DEFAULT_SETTINGS: Settings = {
   youtrackBaseUrl: '',
@@ -9,7 +9,7 @@ const DEFAULT_SETTINGS: Settings = {
   syncQuery: '',
   statusFieldName: 'State',
   stateColors: {},
-  connectorStyles: {},
+  connectorStyles: { ...DEFAULT_LINK_TYPE_STYLES },
   connectorLinkLabels: {},
   concurrency: DEFAULT_SYNC_CONCURRENCY,
   deleteMissingOnSync: false,

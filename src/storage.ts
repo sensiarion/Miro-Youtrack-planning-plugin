@@ -4,6 +4,7 @@ import {
   TOKEN_OBFUSCATION_KEY,
   OBFUSCATED_TOKEN_PREFIX,
   DEFAULT_SYNC_CONCURRENCY,
+  DEFAULT_LINK_TYPE_STYLES,
   type ConnectorStyle,
 } from './constants';
 
@@ -39,7 +40,7 @@ const DEFAULT_SETTINGS: Settings = {
   syncQuery: '',
   statusFieldName: 'State',
   stateColors: {},
-  connectorStyles: {},
+  connectorStyles: { ...DEFAULT_LINK_TYPE_STYLES },
   connectorLinkLabels: {},
   concurrency: DEFAULT_SYNC_CONCURRENCY,
   deleteMissingOnSync: false,
@@ -183,7 +184,9 @@ export async function loadSettings(): Promise<Settings> {
       syncQuery: syncQuery ?? DEFAULT_SETTINGS.syncQuery,
       statusFieldName: statusFieldName ?? DEFAULT_SETTINGS.statusFieldName,
       stateColors: stateColors ?? DEFAULT_SETTINGS.stateColors,
-      connectorStyles: connectorStyles ?? DEFAULT_SETTINGS.connectorStyles,
+      // Merge defaults under stored values: pre-seed known link types but let
+      // any user-saved customization win.
+      connectorStyles: { ...DEFAULT_LINK_TYPE_STYLES, ...(connectorStyles ?? {}) },
       connectorLinkLabels: connectorLinkLabels ?? DEFAULT_SETTINGS.connectorLinkLabels,
       concurrency:
         typeof concurrency === 'number' && concurrency > 0
@@ -198,6 +201,15 @@ export async function loadSettings(): Promise<Settings> {
     console.error('Failed to load settings:', e);
     return { ...DEFAULT_SETTINGS, youtrackBaseUrl, youtrackToken };
   }
+}
+
+/**
+ * Snapshot a Vue reactive value to a plain JSON-safe object.
+ * Miro's board storage serializer mishandles deeply-nested Vue Proxies
+ * (objects-of-objects round-trip empty), so we deep-clone before persisting.
+ */
+function plainSnapshot<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value));
 }
 
 /**
@@ -226,13 +238,17 @@ export async function saveSettings(settings: Partial<Settings>): Promise<void> {
       boardUpdates.push(coll.set(BOARD_KEYS.statusFieldName, settings.statusFieldName));
     }
     if (settings.stateColors !== undefined) {
-      boardUpdates.push(coll.set(BOARD_KEYS.stateColors, settings.stateColors));
+      boardUpdates.push(coll.set(BOARD_KEYS.stateColors, plainSnapshot(settings.stateColors)));
     }
     if (settings.connectorStyles !== undefined) {
-      boardUpdates.push(coll.set(BOARD_KEYS.connectorStyles, settings.connectorStyles as any));
+      boardUpdates.push(
+        coll.set(BOARD_KEYS.connectorStyles, plainSnapshot(settings.connectorStyles) as any),
+      );
     }
     if (settings.connectorLinkLabels !== undefined) {
-      boardUpdates.push(coll.set(BOARD_KEYS.connectorLinkLabels, settings.connectorLinkLabels));
+      boardUpdates.push(
+        coll.set(BOARD_KEYS.connectorLinkLabels, plainSnapshot(settings.connectorLinkLabels)),
+      );
     }
     if (settings.concurrency !== undefined) {
       boardUpdates.push(coll.set(BOARD_KEYS.concurrency, settings.concurrency));

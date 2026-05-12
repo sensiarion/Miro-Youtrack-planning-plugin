@@ -4,7 +4,7 @@ import {
   saveSyncState,
   type SyncState,
 } from '../storage';
-import { searchIssues, fetchIssuesLinks } from '../youtrack/client';
+import { searchIssues, fetchIssuesLinks, fetchIssueMentions } from '../youtrack/client';
 import { YouTrackIssue, YouTrackIssueLink } from '../youtrack/types';
 import {
   updateTaskShape,
@@ -499,12 +499,17 @@ export function useSync() {
         discoveredLabels,
       );
 
-      // Persist styles + labels containing ONLY link types seen in this sync.
-      // Preserve previous user customization if the link type still appears.
-      const connectorStyles: Record<string, ConnectorStyle> = {};
-      const connectorLinkLabels: Record<string, string> = {};
+      // Merge discovered link types into previously-saved styles. Never prune:
+      // user customizations for link types not present in this sync's results
+      // must survive (e.g. when sync query excludes subtask-linked issues).
+      const connectorStyles: Record<string, ConnectorStyle> = { ...previousConnectorStyles };
+      const connectorLinkLabels: Record<string, string> = {
+        ...(settings.value.connectorLinkLabels ?? {}),
+      };
       for (const [name] of discoveredLinkTypes) {
-        connectorStyles[name] = previousConnectorStyles[name] ?? getDefaultStyleForLinkType();
+        if (!(name in connectorStyles)) {
+          connectorStyles[name] = getDefaultStyleForLinkType(name);
+        }
         const label = discoveredLabels.get(name);
         if (label) connectorLinkLabels[name] = label;
       }
@@ -601,6 +606,23 @@ export function useSync() {
 
       const issueIdsOnBoard = Array.from(youtrackIdToNodeIdMap.keys());
       const linksMap = await fetchIssuesLinksLimited(baseUrl, token, issueIdsOnBoard, concurrency);
+      // Augment with "Mentions" virtual links parsed from issue descriptions + comments.
+      // We restrict mention edges to pairs where both endpoints are on the board to
+      // avoid creating dangling references.
+      const issueIdsOnBoardSet = new Set(issueIdsOnBoard);
+      await runWithConcurrency(issueIdsOnBoard, concurrency, async issueId => {
+        const mentions = await fetchIssueMentions(baseUrl, token, issueId);
+        if (mentions.length === 0) return;
+        const filtered = mentions
+          .map(link => ({
+            ...link,
+            issues: link.issues.filter(i => issueIdsOnBoardSet.has(i.idReadable)),
+          }))
+          .filter(link => link.issues.length > 0);
+        if (filtered.length === 0) return;
+        const existing = linksMap.get(issueId) ?? [];
+        linksMap.set(issueId, [...existing, ...filtered]);
+      });
 
       const createdConnectorKeys = new Set<string>();
       const creationTasks: Array<{
@@ -610,11 +632,11 @@ export function useSync() {
       }> = [];
 
       for (const [issueId, links] of linksMap.entries()) {
-        const sourceNodeId = youtrackIdToNodeIdMap.get(issueId);
-        if (!sourceNodeId) continue;
+        const currentNodeId = youtrackIdToNodeIdMap.get(issueId);
+        if (!currentNodeId) continue;
 
-        const sourceShape = nodeIdToShapeMap.get(sourceNodeId);
-        if (!sourceShape) continue;
+        const currentShape = nodeIdToShapeMap.get(currentNodeId);
+        if (!currentShape) continue;
 
         for (const link of links) {
           if (link?.linkType?.name) {
@@ -627,11 +649,20 @@ export function useSync() {
           for (const linkedIssue of link.issues) {
             if (linkedIssue.idReadable === issueId) continue;
 
-            const targetNodeId = youtrackIdToNodeIdMap.get(linkedIssue.idReadable);
-            if (!targetNodeId) continue;
+            const linkedNodeId = youtrackIdToNodeIdMap.get(linkedIssue.idReadable);
+            if (!linkedNodeId) continue;
 
-            const targetShape = nodeIdToShapeMap.get(targetNodeId);
-            if (!targetShape) continue;
+            const linkedShape = nodeIdToShapeMap.get(linkedNodeId);
+            if (!linkedShape) continue;
+
+            // Canonical orientation: connector always points from link's SOURCE
+            // to its TARGET, regardless of which endpoint we're iterating from.
+            // direction='outward': current issue IS the source → current → linked
+            // direction='inward':  current issue is the target → linked → current
+            // direction='both':    symmetric, pick stable ordering (no arrow anyway)
+            const currentIsSource = link.direction !== 'inward';
+            const sourceShape = currentIsSource ? currentShape : linkedShape;
+            const targetShape = currentIsSource ? linkedShape : currentShape;
 
             const sortedIds = [issueId, linkedIssue.idReadable].sort();
             const connectorKey = `${link.linkType.name}:${sortedIds[0]}:${sortedIds[1]}`;
