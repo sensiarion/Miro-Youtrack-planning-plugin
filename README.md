@@ -3,8 +3,7 @@
 Visualize YouTrack issues on a Miro board, sync state and links, create new
 issues from board selection.
 
-<video src="https://github.com/sensiarion/Miro-Youtrack-planning-plugin/raw/refs/heads/main/docs/screenshots/usage_example.mp4">
-</video>
+https://github.com/sensiarion/Miro-Youtrack-planning-plugin/raw/refs/heads/main/docs/screenshots/usage_example.mp4
 
 After rearranging, you can get visualization of your working flow to track it
 
@@ -13,8 +12,8 @@ After rearranging, you can get visualization of your working flow to track it
 ## Install (users)
 
 - ~~**Miro marketplace**: search "YouTrack" in the Miro Apps panel and add it.~~
-- From install url https://miro.com/app-install/?response_type=code&client_id=3458764656911449227&redirect_uri=%2Fapp-install%2Fconfirm%2F 
-   
+- From install
+  url https://miro.com/app-install/?response_type=code&client_id=3458764656911449227&redirect_uri=%2Fapp-install%2Fconfirm%2F
 
 Then open any board and launch the plugin from the apps panel.
 
