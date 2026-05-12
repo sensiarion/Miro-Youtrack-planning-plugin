@@ -12,6 +12,8 @@ After rearranging, you can get visualization of your working flow to track it
 ## Install (users)
 
 - **Miro marketplace**: search "YouTrack" in the Miro Apps panel and add it.
+- Add domain `sensiarion.github.io` to your allowed list in Administration settings tab `Srver Settings`->
+  `Global Settings` -> `Server Configuration` -> `Allowed origins`
 
 Then open any board and launch the plugin from the apps panel.
 
