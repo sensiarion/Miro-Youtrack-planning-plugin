@@ -195,16 +195,41 @@ export function useCreateIssue() {
     const color = getTaskColor(stateKey, settings.value.stateColors, issue.stateName);
     const content = buildTaskMindmapContent(issue);
 
-    if ('content' in shape) shape.content = content;
-    if (shape.style && typeof shape.style === 'object') {
-      shape.style.fillColor = color;
-      shape.style.color = '#000000';
-    }
-    shape.linkedTo = issue.url;
-    try {
-      await shape.sync();
-    } catch (e) {
-      console.warn('Could not sync transformed shape:', e);
+    const isMindmapNode = shape.type === 'mindmap_node' || !!shape.nodeView;
+
+    if (isMindmapNode) {
+      if (shape.nodeView) {
+        shape.nodeView.content = content;
+        if (!shape.nodeView.style || typeof shape.nodeView.style !== 'object') {
+          shape.nodeView.style = {};
+        }
+        shape.nodeView.style.color = color;
+      }
+      shape.linkedTo = issue.url;
+      // Children of a mindmap parent reject sync(); content+style still persist.
+      const hasParent = shape.parentId !== null && shape.parentId !== undefined;
+      if (!hasParent) {
+        try {
+          await shape.sync();
+        } catch (error: any) {
+          const msg = error?.message || '';
+          if (!msg.includes('child') && !msg.includes('parent') && !msg.includes('inside a parent')) {
+            console.warn('Could not sync transformed mindmap node:', error);
+          }
+        }
+      }
+    } else {
+      if ('content' in shape) shape.content = content;
+      if (shape.style && typeof shape.style === 'object') {
+        shape.style.fillColor = color;
+        shape.style.color = '#000000';
+      }
+      shape.linkedTo = issue.url;
+      try {
+        await shape.sync();
+      } catch (e) {
+        console.warn('Could not sync transformed shape:', e);
+      }
     }
     await shape.setMetadata(METADATA_KEY, metadataPayload(issue) as any);
   }

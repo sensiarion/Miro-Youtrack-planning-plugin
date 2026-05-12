@@ -19,7 +19,7 @@ export async function init() {
           icon: 'plus',
           position: 'context-menu',
         },
-        predicate: { type: ['shape', 'sticky_note', 'text', 'card'] },
+        predicate: { type: ['shape', 'sticky_note', 'text', 'card', 'mindmap_node'] },
       });
     }
   } catch (e) {
