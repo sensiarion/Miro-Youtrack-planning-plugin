@@ -25,8 +25,16 @@ function consumePendingCreate(): void {
     if (!raw) return;
     localStorage.removeItem(PENDING_CREATE_KEY);
     const payload = JSON.parse(raw);
+    // Right-click handoff uses `description` for selection text; older keys (`summary`)
+    // still supported for backward compatibility with cached payloads.
+    const desc =
+      typeof payload.description === 'string'
+        ? payload.description
+        : typeof payload.summary === 'string'
+          ? payload.summary
+          : undefined;
     void openCreateView({
-      summary: typeof payload.summary === 'string' ? payload.summary : undefined,
+      description: desc,
       parentIssueId: typeof payload.parent === 'string' ? payload.parent : undefined,
       linkedIssueIds: Array.isArray(payload.linked) ? payload.linked : undefined,
       transformShapeId: typeof payload.transform === 'string' ? payload.transform : undefined,

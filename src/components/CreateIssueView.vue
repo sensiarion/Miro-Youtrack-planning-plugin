@@ -92,7 +92,7 @@ async function handleSubmit() {
 
       <div class="form-group form-group-full">
         <label for="ci-description">Description:</label>
-        <textarea id="ci-description" v-model="description" class="input textarea" rows="5" placeholder="Markdown supported"></textarea>
+        <textarea id="ci-description" v-model="description" class="input textarea" rows="15" placeholder="Markdown supported"></textarea>
       </div>
 
       <div class="form-group form-group-full">
@@ -233,7 +233,7 @@ async function handleSubmit() {
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
-.textarea { resize: vertical; }
+.textarea { resize: vertical; min-height: 240px; }
 
 .error,
 .warning,

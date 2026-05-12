@@ -17,7 +17,8 @@ import type { YouTrackIssue } from '../youtrack/types';
 interface OpenOptions {
   parentIssueId?: string;
   linkedIssueIds?: string[];
-  summary?: string;
+  /** Text harvested from the selected board element. Pre-fills the description field; the user types their own summary. */
+  description?: string;
   /** If provided, after creation the board shape with this id is transformed into a plugin-managed task card instead of creating a new card. */
   transformShapeId?: string;
 }
@@ -56,6 +57,57 @@ export function useCreateIssue() {
     submitError.value = null;
   }
 
+  /**
+   * Walk plugin-managed task cards on the board and pick the project whose shortName
+   * matches the most-frequent `idReadable` prefix. Falls back to the last-used project
+   * stored in localStorage, then to the first project in the list.
+   */
+  async function applyBoardDefaultProject(): Promise<void> {
+    if (projects.value.length === 0) return;
+    try {
+      const items: any[] = [];
+      try {
+        const mindmapNodes = await (miro.board as any).experimental?.get?.({ type: 'mindmap_node' });
+        if (Array.isArray(mindmapNodes)) items.push(...mindmapNodes);
+      } catch {
+        /* mindmap query unavailable — skip */
+      }
+      try {
+        const shapes = await miro.board.get({ type: 'shape' });
+        if (Array.isArray(shapes)) items.push(...shapes);
+      } catch {
+        /* ignore */
+      }
+
+      const countsByShortName = new Map<string, number>();
+      for (const item of items) {
+        if (typeof item?.getMetadata !== 'function') continue;
+        const meta = await item.getMetadata(METADATA_KEY).catch(() => null);
+        const idReadable = meta && typeof meta === 'object' ? (meta as any).issueId : null;
+        if (typeof idReadable !== 'string') continue;
+        const dash = idReadable.indexOf('-');
+        if (dash <= 0) continue;
+        const shortName = idReadable.slice(0, dash);
+        countsByShortName.set(shortName, (countsByShortName.get(shortName) ?? 0) + 1);
+      }
+
+      let bestId: string | null = null;
+      let bestCount = 0;
+      for (const project of projects.value) {
+        const count = countsByShortName.get(project.shortName) ?? 0;
+        if (count > bestCount) {
+          bestCount = count;
+          bestId = project.id;
+        }
+      }
+      if (bestId) {
+        selectedProjectId.value = bestId;
+      }
+    } catch (e) {
+      console.warn('Could not derive default project from board:', e);
+    }
+  }
+
   async function loadProjects(): Promise<void> {
     const baseUrl = settings.value.youtrackBaseUrl;
     const token = settings.value.youtrackToken;
@@ -88,12 +140,13 @@ export function useCreateIssue() {
     if (opts.linkedIssueIds && opts.linkedIssueIds.length > 0) {
       linkedIssueIds.value = [...opts.linkedIssueIds];
     }
-    if (opts.summary) summary.value = opts.summary;
+    if (opts.description) description.value = opts.description;
     if (opts.transformShapeId) transformShapeId.value = opts.transformShapeId;
     isOpen.value = true;
     if (projects.value.length === 0) {
       await loadProjects();
     }
+    await applyBoardDefaultProject();
   }
 
   function close(): void {

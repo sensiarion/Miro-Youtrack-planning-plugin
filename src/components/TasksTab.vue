@@ -49,13 +49,29 @@ function extractText(item: any): string {
   return '';
 }
 
+async function getSelectionItems(): Promise<any[]> {
+  // Stable `miro.board.getSelection()` excludes experimental items (mindmap_node).
+  // Prefer the experimental selection API when present so mindmap nodes participate.
+  try {
+    const expSel = (miro.board as any).experimental?.getSelection;
+    if (typeof expSel === 'function') {
+      const items = await expSel.call((miro.board as any).experimental);
+      if (Array.isArray(items)) return items;
+    }
+  } catch {
+    /* fall through */
+  }
+  const items = await miro.board.getSelection();
+  return Array.isArray(items) ? items : [];
+}
+
 async function readSelectionContext(): Promise<{
   pluginIssueId: string | null;
   nonPluginText: string | null;
   nonPluginShapeId: string | null;
 }> {
   try {
-    const selection = await miro.board.getSelection();
+    const selection = await getSelectionItems();
     if (!selection || selection.length === 0) {
       return { pluginIssueId: null, nonPluginText: null, nonPluginShapeId: null };
     }
@@ -63,14 +79,21 @@ async function readSelectionContext(): Promise<{
     let nonPluginText: string | null = null;
     let nonPluginShapeId: string | null = null;
     for (const item of selection) {
-      try {
-        const meta = await (item as any).getMetadata?.(METADATA_KEY);
-        if (meta && typeof meta === 'object' && typeof (meta as any).issueId === 'string') {
-          pluginIssueId = (meta as any).issueId as string;
-          continue;
+      const itemType = (item as any)?.type;
+      // Plain text widgets are never plugin task cards even if they happen to carry
+      // stale metadata or contain a YouTrack URL — treat as free-form selection source.
+      const eligibleForPluginTask =
+        itemType === 'mindmap_node' || itemType === 'shape' || itemType === 'card';
+      if (eligibleForPluginTask) {
+        try {
+          const meta = await (item as any).getMetadata?.(METADATA_KEY);
+          if (meta && typeof meta === 'object' && typeof (meta as any).issueId === 'string') {
+            pluginIssueId = (meta as any).issueId as string;
+            continue;
+          }
+        } catch {
+          /* ignore */
         }
-      } catch {
-        /* ignore */
       }
       const text = extractText(item);
       if (text && !nonPluginText) {
@@ -93,7 +116,7 @@ async function refreshSelection(): Promise<void> {
 
 function handleCreateIssue() {
   void openCreateView({
-    summary: selectedNonPluginText.value || undefined,
+    description: selectedNonPluginText.value || undefined,
     transformShapeId: selectedNonPluginShapeId.value || undefined,
   });
 }
@@ -102,7 +125,7 @@ function handleCreateSubtask() {
   if (!selectedNodeIssueId.value) return;
   void openCreateView({
     parentIssueId: selectedNodeIssueId.value,
-    summary: selectedNonPluginText.value || undefined,
+    description: selectedNonPluginText.value || undefined,
     transformShapeId: selectedNonPluginShapeId.value || undefined,
   });
 }
@@ -120,8 +143,8 @@ if (settings.value.taskQuery !== undefined && settings.value.taskQuery !== taskQ
 }
 
 const truncatedSelectionText = computed(() => {
-  const text = selectedNonPluginText.value || '';
-  return text.length > 60 ? text.slice(0, 57) + '…' : text;
+  const text = (selectedNonPluginText.value || '').replace(/\s+/g, ' ').trim();
+  return text.length > 36 ? text.slice(0, 33) + '…' : text;
 });
 
 const boardCountByIssueId = computed(() => {
@@ -412,7 +435,7 @@ h2 {
   font-weight: 400;
   font-style: italic;
   opacity: 0.9;
-  max-width: 220px;
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

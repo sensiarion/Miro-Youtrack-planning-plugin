@@ -32,8 +32,8 @@ export async function init() {
       if (!items.length) return;
       const item = items[0];
       const text = extractShapeText(item);
-      const payload: { summary?: string; transform?: string } = {};
-      if (text) payload.summary = text;
+      const payload: { description?: string; transform?: string } = {};
+      if (text) payload.description = text;
       if (item?.id) payload.transform = item.id;
       try {
         localStorage.setItem(PENDING_CREATE_KEY, JSON.stringify(payload));
