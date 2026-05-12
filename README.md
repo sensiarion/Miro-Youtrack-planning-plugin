@@ -11,9 +11,10 @@ After rearranging, you can get visualization of your working flow to track it
 
 ## Install (users)
 
-- **Miro marketplace**: search "YouTrack" in the Miro Apps panel and add it.
-- Add domain `sensiarion.github.io` to your allowed list in Administration settings tab `Srver Settings`->
-  `Global Settings` -> `Server Configuration` -> `Allowed origins`
+- ~~**Miro marketplace**: search "YouTrack" in the Miro Apps panel and add it.~~
+  - currently, plugin approach is not passing Security guidelines of miro marketplace
+- From install url https://miro.com/app-install/?response_type=code&client_id=3458764656911449227&redirect_uri=%2Fapp-install%2Fconfirm%2F 
+   
 
 Then open any board and launch the plugin from the apps panel.
 
@@ -29,6 +30,11 @@ In the **Settings** tab fill in:
 
 URL + token are stored on your device (token lightly obfuscated). Per-board
 settings (queries, colors, connector styles) live in Miro board storage.
+
+Then configure your youtrack instance to access requests from plugin:
+
+- Add domain `sensiarion.github.io` to your allowed list in Administration settings tab `Srver Settings`->
+  `Global Settings` -> `Server Configuration` -> `Allowed origins`
 
 ![Settings tab — Connection (URL + token + status field) and Appearance (state colors + per-link-type connector styles).](docs/screenshots/01-settings.png)
 
